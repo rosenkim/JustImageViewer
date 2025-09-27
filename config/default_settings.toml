@@ -1,0 +1,13 @@
+# Vibe Image Viewer — default configuration
+# Copy is automatically created in the platform config directory on first launch.
+
+restore_last_folder = true
+slideshow_interval_secs = 5
+cache_mb = 512
+prefetch_neighbors = 2
+
+[background_style]
+# mode can be "checker" or "solid"
+mode = "checker"
+# brightness in the 0.0..=1.0 range controls neutral grey level
+brightness = 0.5
