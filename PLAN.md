@@ -1,70 +1,95 @@
-# Port Plan: eframe → imgui-rs (SDL backend)
+# Port Plan: eframe/egui -> imgui-rs (SDL2 + OpenGL)
 
 ## Goals
-- Recreate the existing Vibe Image Viewer experience (see screenshot in request) using `imgui-rs` with an SDL2 windowing/backend stack.
-- Preserve core functionality: folder selection, drag-and-drop folders/files, sortable library list, image preview with metadata, status reporting, and configuration persistence.
-- Maintain portability across macOS, Windows, and Linux while matching the app's dark theme aesthetics.
+- Recreate the current Vibe Image Viewer UX on `imgui-rs` with an SDL2 + OpenGL runtime.
+- Preserve current features: folder open, drag-and-drop (folder/file), library list selection, image preview + metadata, keyboard navigation, status messaging, and config persistence.
+- Keep cross-platform behavior on macOS, Windows, Linux.
 
-## Current State Recap (eframe/egui)
-- `src/main.rs` launches an `eframe` window with WGPU renderer and mounts `ViewerApp`.
-- `ViewerApp` in `src/app/mod.rs` orchestrates state (`AppState`) and renders via egui panels:
-  - Top menu bar with File/View/Help menus and quit handling.
-  - Left `SidePanel` showing the "Library" list and folder info.
-  - Central image viewer area with zoom-to-fit, metadata labels, and drop handling.
-  - Bottom status bar displaying configuration info and status messages.
-- `core::media` scans directories for PNG/JPEG images, while `core::image_loader` decodes images into RGBA buffers.
-- File dialogs rely on `rfd`; logging/config layers live under `infra`.
+## Current Baseline (What Exists Today)
+- `src/main.rs` starts `eframe` (`Wgpu`) and mounts `ViewerApp`.
+- `src/app/mod.rs` currently owns both state and egui rendering:
+  - Top menu: File/View/Help
+  - Left library panel
+  - Center image panel with fit-to-view behavior
+  - Bottom status bar
+  - Drop handling + keyboard navigation
+- `src/core/media.rs` scans folders for PNG/JPEG.
+- `src/core/image_loader.rs` decodes into RGBA.
+- `src/infra/config.rs`, `src/infra/logging.rs` already provide persistence/logging.
 
-## Target Stack & Crates
-- Push renderer/window stack to SDL2 + OpenGL for `imgui-rs`.
-  - `sdl2` for window, GL context, input, drag-and-drop events.
-  - `imgui`, `imgui-sdl2` for event integration, and `imgui-opengl-renderer` (or `imgui-winit-support` alternative if GL unsuitable) for drawing.
-  - Retain `image`, `rfd`, `anyhow`, logging crates already in use.
-- Introduce a texture manager abstraction to upload `DecodedImage` data into OpenGL textures and recycle them when switching images.
+## Technical Decisions
+- Runtime stack: `sdl2` + `imgui` + `imgui-sdl2` + `imgui-opengl-renderer`.
+- Rendering path: OpenGL textures created from decoded RGBA buffers.
+- Keep existing `core` and `infra` modules; move UI-framework-specific code out of core app state.
+- Do not mix in `winit` support libraries in this migration.
 
-## Implementation Phases
-1. **Bootstrap SDL + imgui runtime**
-   - Extend `Cargo.toml` with SDL2/imgui dependencies and feature flags (ensure `bundled` feature for SDL on macOS if needed).
-   - Initialize SDL2 (video, events) and create an OpenGL-enabled window sized similar to current app (min 1024×768).
-   - Create an `imgui::Context`, configure style to mimic the dark look from the screenshot, and install `imgui-sdl2` input pump + `imgui_opengl_renderer::Renderer`.
-   - Port logging/config bootstrap code into the new `main` while honoring `windows_subsystem` attribute behavior.
+## Work Plan
+1. **Bootstrap new runtime entrypoint**
+- Add SDL2/imgui/OpenGL dependencies in `Cargo.toml`.
+- Replace eframe startup in `src/main.rs` with:
+  - SDL2 init (video/events)
+  - OpenGL context + window creation
+  - imgui context + fonts/style setup
+  - `imgui-sdl2` integration and frame loop
+- Preserve current logging/config bootstrap and Windows subsystem behavior.
 
-2. **Restructure application state**
-   - Extract `ViewerApp` state logic into a backend-agnostic core module (reusing `AppState`, `format_file_size`, loaders, navigation helpers).
-   - Expose methods for UI layer to query state (`status_message`, `media_items`, `current_texture_path`, etc.) and to trigger actions (`load_folder`, `advance_selection`, `handle_drop`, menu actions).
-   - Replace egui texture management with hooks to the new OpenGL texture store (store `Option<TextureId>` instead of `TextureHandle`).
+2. **Split state from UI framework**
+- Extract framework-agnostic app state/actions from `ViewerApp` into backend-neutral module(s).
+- Keep actions as explicit methods: `load_folder`, `handle_drop_path`, `advance_selection`, `open_folder_dialog`, etc.
+- Keep derived read models for UI: selected entry, status text, image metadata.
 
-3. **Implement SDL event loop & interaction glue**
-   - Translate SDL events (keyboard, mouse wheel, window resize, drop) into imgui inputs via `imgui_sdl2::ImguiSdl2`.
-   - Map shortcuts: Arrow keys, page navigation, ⌘/Ctrl+O for open folder, file-drop handlers to call existing folder/image loaders.
-   - Forward quit requests (`SDL_QUIT`) to terminate cleanly; replicate menu-triggered quit by setting loop flag.
+3. **Introduce texture manager**
+- Add OpenGL texture lifecycle module:
+  - upload RGBA buffers (`glTexImage2D`)
+  - cache/reuse by file path where safe
+  - destroy textures on replacement/shutdown
+- UI state should reference texture keys/ids from this manager, not egui `TextureHandle`.
 
-4. **Rebuild UI with imgui windows**
-   - Construct a main dockspace or manual layout mirroring the screenshot: top menu bar, left child window (`Window::new("Library")` + `ChildWindow` for scroll list), central viewer, bottom status bar (`imgui::WindowFlags::NoTitleBar` etc.).
-   - Implement menu bar with File/View/Help entries; wire actions to state methods and placeholder overlays.
-   - In the viewer area, calculate image fit scaling manually and render with `imgui::Image` using OpenGL texture id; display metadata stack below (text, separators) to mimic current layout.
+4. **Rebuild UI in imgui**
+- Recreate existing layout with imgui windows/child regions:
+  - top menu bar
+  - left library list
+  - center image viewport
+  - bottom status bar
+- Re-implement current interactions:
+  - library click selection
+  - arrow/page navigation
+  - File -> Open Folder
+  - drag/drop folder or file
+- Maintain fit-to-view image scaling and metadata display.
 
-5. **OpenGL texture pipeline**
-   - Build a `TextureManager` that loads `DecodedImage` into GL textures (glTexImage2D); reuse textures when reloading same path; free textures when image changes or on shutdown.
-   - Handle hi-DPI scaling (SDL2 `dpi` queries + imgui `fonts.tex_filters`) to ensure crisp rendering on macOS Retina like the screenshot.
+5. **Wire SDL events + shortcuts**
+- Translate SDL event stream into imgui input through `imgui-sdl2`.
+- Handle app-level events directly from SDL:
+  - `Quit`
+  - `DropFile`/`DropText` as needed
+  - resize events for viewport/scale correctness
+- Implement cross-platform modifier handling (`Cmd` on macOS, `Ctrl` elsewhere) for Open Folder.
 
-6. **Persistence & status updates**
-   - Keep `infra::config` for restoring last folder preference; persist changed settings when closing.
-   - Ensure status messages update across the SDL loop (e.g., when folder dialog canceled, load success/fail, decode errors) and render in bottom bar.
+6. **Persistence and shutdown**
+- Keep existing config semantics (including restore-last-folder behavior).
+- Ensure status messages mirror existing behavior for cancel/success/error states.
+- On shutdown, release GL textures and exit cleanly without resource leaks.
 
-7. **Testing & polish**
-   - Manual test flows: startup without folder, open folder via dialog, drag/drop folder, navigate with keyboard, error handling for unsupported files.
-   - Validate hot reload of textures when switching images quickly to avoid leaks.
-   - Confirm graceful shutdown (destroy GL textures, drop SDL/ImGui contexts).
+## Validation Checklist (Definition of Done)
+- App starts to an empty state without panic.
+- Open folder via menu loads supported images and selects first image.
+- Drag folder works; drag file opens parent and focuses dropped file when present.
+- Arrow/Page keys cycle images correctly.
+- Viewer scales large images to fit viewport and keeps metadata visible.
+- Status bar updates for cancel, load success, and decode failure paths.
+- Last-folder behavior remains consistent with config settings.
+- No obvious GL texture leak during rapid image switching.
 
-## Risk Notes & Mitigations
-- **SDL & imgui dependency setup**: GL loader differences per platform; gate with cfgs or use `glow` as abstraction if issues arise.
-- **Hi-DPI handling**: need correct framebuffer scale on macOS; query `window.drawable_size()` and feed to renderer each frame.
-- **Drag-and-drop events**: SDL returns raw C strings; ensure UTF-8 conversion and proper path normalization.
-- **Texture lifetime**: avoid stale `TextureId` reuse by clearing manager when folder changes.
-- **Menu shortcuts**: Confirm ImGui handles platform modifiers (Command vs Control) and adapt accordingly.
+## Risks and Mitigations
+- **OpenGL setup differences by platform**: isolate GL init code and validate per OS early.
+- **HiDPI scaling issues**: use drawable size vs logical size correctly each frame.
+- **Drop path encoding**: normalize and validate UTF-8/path conversion before use.
+- **State/UI coupling regressions**: enforce state-only unit tests for folder scan/selection transitions.
 
 ## Deliverables
-- Updated Cargo dependencies & `main.rs` entry using SDL/imgui loop.
-- New renderer/texture modules and refactored `ViewerApp` UI built with `imgui` widgets.
-- Documentation in README/PLAN follow-up summarizing build steps for SDL requirements.
+- Updated `Cargo.toml` and SDL2/imgui-based `src/main.rs`.
+- New backend-neutral app-state module(s).
+- New OpenGL texture manager module.
+- imgui-based UI rendering layer replacing egui panels.
+- Brief README update for SDL2/OpenGL build/runtime prerequisites.
