@@ -7,7 +7,7 @@ mod render;
 
 use anyhow::Context;
 use app::{ViewerState, format_file_size};
-use imgui::{Condition, Context as ImguiContext};
+use imgui::{Condition, Context as ImguiContext, FontConfig, FontGlyphRanges, FontSource};
 use sdl2::{
     event::Event,
     keyboard::{Keycode, Mod},
@@ -59,8 +59,15 @@ fn main() -> anyhow::Result<()> {
 
     gl::load_with(|symbol| video.gl_get_proc_address(symbol) as *const _);
 
+    let max_texture_size = unsafe {
+        let mut size: i32 = 0;
+        gl::GetIntegerv(gl::MAX_TEXTURE_SIZE, &mut size);
+        size
+    };
+    log::info!("OpenGL max texture size: {}x{}", max_texture_size, max_texture_size);
+
     let mut app_state = ViewerState::new(config_handle.path, config_handle.settings);
-    let mut texture_manager = TextureManager::new();
+    let mut texture_manager = TextureManager::new(max_texture_size);
     let mut current_texture: Option<UploadedTexture> = None;
 
     restore_last_folder_if_needed(&mut app_state);
@@ -68,6 +75,50 @@ fn main() -> anyhow::Result<()> {
     let mut imgui = ImguiContext::create();
     imgui.set_ini_filename(None);
     imgui.style_mut().use_dark_colors();
+
+    // Load custom font (place your .ttf file at assets/fonts/)
+    let font_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("assets")
+        .join("fonts")
+        .join("NanumGothic.ttf");
+
+    if font_path.exists() {
+        let font_data = std::fs::read(&font_path)
+            .expect("failed to read custom font file");
+        // Leak the data so it lives for the entire program lifetime.
+        // imgui requires the font data slice to live as long as the context.
+        let font_data: &'static [u8] = Box::leak(font_data.into_boxed_slice());
+
+        imgui.fonts().add_font(&[
+            FontSource::TtfData {
+                data: font_data,
+                size_pixels: 14.0,
+                config: Some(FontConfig {
+                    glyph_ranges: FontGlyphRanges::from_slice(&[
+                        // Basic Latin + Latin Supplement
+                        0x0020, 0x00FF,
+                        // Korean (Hangul Syllables)
+                        0xAC00, 0xD7A3,
+                        // Korean (Hangul Jamo)
+                        0x1100, 0x11FF,
+                        // Korean (Hangul Compatibility Jamo)
+                        0x3130, 0x318F,
+                        // CJK Unified Ideographs (common Hanja)
+                        0x4E00, 0x9FFF,
+                        // Null terminator
+                        0,
+                    ]),
+                    ..FontConfig::default()
+                }),
+            },
+        ]);
+        log::info!("Custom font loaded: {}", font_path.display());
+    } else {
+        log::warn!(
+            "Custom font not found at {}, using default imgui font",
+            font_path.display()
+        );
+    }
 
     let mut imgui_sdl2 = imgui_sdl2::ImguiSdl2::new(&mut imgui, &window);
     let renderer =
@@ -158,7 +209,7 @@ fn main() -> anyhow::Result<()> {
         let display = ui.io().display_size;
         let menu_height = 24.0;
         let status_height = 34.0;
-        let left_width = 280.0;
+        let left_width = 300.0;
         let content_height = (display[1] - menu_height - status_height).max(120.0);
         let viewer_width = (display[0] - left_width).max(220.0);
         let window_flags = imgui::WindowFlags::NO_MOVE
