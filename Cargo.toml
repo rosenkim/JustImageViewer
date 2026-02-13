@@ -7,9 +7,13 @@ edition = "2024"
 anyhow = "1.0"
 directories = "5"
 env_logger = "0.11"
-eframe = { version = "0.28", default-features = false, features = ["wgpu", "default_fonts"] }
+gl = "0.14"
 image = { version = "0.24", default-features = false, features = ["png", "jpeg"] }
+imgui = "0.11"
+imgui-opengl-renderer = "0.12.1"
+imgui-sdl2 = "0.15"
 log = "0.4"
 rfd = "0.13"
+sdl2 = { version = "0.36", features = ["bundled"] }
 serde = { version = "1.0", features = ["derive"] }
 toml = "0.8"

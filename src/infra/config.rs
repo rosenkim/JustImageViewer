@@ -1,4 +1,7 @@
-use std::{fs, path::PathBuf};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+};
 
 use anyhow::{Context, Result};
 use directories::ProjectDirs;
@@ -13,6 +16,7 @@ const CONFIG_FILENAME: &str = "settings.toml";
 #[serde(default)]
 pub struct AppConfig {
     pub restore_last_folder: bool,
+    pub last_open_folder: Option<PathBuf>,
     pub slideshow_interval_secs: u64,
     pub cache_mb: u64,
     pub prefetch_neighbors: usize,
@@ -23,6 +27,7 @@ impl Default for AppConfig {
     fn default() -> Self {
         Self {
             restore_last_folder: true,
+            last_open_folder: None,
             slideshow_interval_secs: 5,
             cache_mb: 512,
             prefetch_neighbors: 2,
@@ -66,6 +71,7 @@ pub struct ConfigHandle {
     pub path: PathBuf,
 }
 
+/// Load config file, or create one from template on first run.
 pub fn load_or_create() -> Result<ConfigHandle> {
     let Some(dirs) = ProjectDirs::from(QUALIFIER, ORGANIZATION, APPLICATION) else {
         return Err(anyhow::anyhow!(
@@ -111,6 +117,13 @@ pub fn load_or_create() -> Result<ConfigHandle> {
         settings,
         path: config_path,
     })
+}
+
+/// Save current config state back to disk.
+pub fn save(path: &Path, settings: &AppConfig) -> Result<()> {
+    let serialized = toml::to_string_pretty(settings).context("failed to serialize config")?;
+    fs::write(path, serialized)
+        .with_context(|| format!("failed to write configuration file {}", path.display()))
 }
 
 fn default_template() -> &'static str {
