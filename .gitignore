@@ -38,4 +38,9 @@ Cargo.lock
 
 # End of https://www.toptal.com/developers/gitignore/api/rust,visualstudiocode
 
+.DS_Store
+._.DS_Store
+**/.DS_Store
+**/._.DS_Store
+
 NUL.*
