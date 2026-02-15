@@ -145,7 +145,7 @@ impl ViewerState {
                 let total = entries.len();
                 if total == 0 {
                     self.status_message = format!(
-                        "No supported images in {} (PNG, JPEG, BMP, GIF, WebP, TIFF, TGA, ICO, PNM, HDR, DDS, Farbfeld)",
+                        "No supported images in {} (PNG, JPEG, BMP, GIF, WebP, TIFF, TGA, ICO, PNM, DDS, Farbfeld)",
                         directory_display
                     );
                     self.config.last_open_directory = Some(directory.clone());
