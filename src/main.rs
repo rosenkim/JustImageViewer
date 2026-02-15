@@ -367,7 +367,7 @@ fn render_ui(
                         ui.text("No image selected or decode failed.");
                     } else {
                         ui.text("Welcome to Vibe Image Viewer");
-                        ui.text("Open a PNG/JPEG folder to begin.");
+                        ui.text("Open an image folder to begin.");
                     }
                 });
 

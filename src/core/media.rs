@@ -10,13 +10,33 @@ use anyhow::{Context, Result};
 pub enum MediaFormat {
     Png,
     Jpeg,
+    Bmp,
+    Gif,
+    WebP,
+    Tiff,
+    Tga,
+    Ico,
+    Pnm,
+    // Hdr,
+    Dds,
+    Farbfeld,
 }
 
 impl MediaFormat {
     pub fn from_extension(ext: &str) -> Option<Self> {
         match ext.to_ascii_lowercase().as_str() {
             "png" => Some(Self::Png),
-            "jpg" | "jpeg" => Some(Self::Jpeg),
+            "jpg" | "jpeg" | "jfif" => Some(Self::Jpeg),
+            "bmp" => Some(Self::Bmp),
+            "gif" => Some(Self::Gif),
+            "webp" => Some(Self::WebP),
+            "tif" | "tiff" => Some(Self::Tiff),
+            "tga" => Some(Self::Tga),
+            "ico" => Some(Self::Ico),
+            "pbm" | "pgm" | "ppm" | "pnm" => Some(Self::Pnm),
+            // "hdr" => Some(Self::Hdr),
+            "dds" => Some(Self::Dds),
+            "ff" | "farbfeld" => Some(Self::Farbfeld),
             _ => None,
         }
     }
@@ -25,6 +45,16 @@ impl MediaFormat {
         match self {
             Self::Png => "PNG",
             Self::Jpeg => "JPEG",
+            Self::Bmp => "BMP",
+            Self::Gif => "GIF",
+            Self::WebP => "WebP",
+            Self::Tiff => "TIFF",
+            Self::Tga => "TGA",
+            Self::Ico => "ICO",
+            Self::Pnm => "PNM",
+            // Self::Hdr => "HDR",
+            Self::Dds => "DDS",
+            Self::Farbfeld => "Farbfeld",
         }
     }
 }

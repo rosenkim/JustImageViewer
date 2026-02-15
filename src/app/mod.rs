@@ -124,8 +124,10 @@ impl ViewerState {
             Ok(entries) => {
                 let total = entries.len();
                 if total == 0 {
-                    self.status_message =
-                        format!("No supported PNG/JPEG images in {}", folder_display);
+                    self.status_message = format!(
+                        "No supported images in {} (PNG, JPEG, BMP, GIF, WebP, TIFF, TGA, ICO, PNM, HDR, DDS, Farbfeld)",
+                        folder_display
+                    );
                     self.config.last_open_folder = Some(folder.clone());
                     self.current_folder = Some(folder);
                     self.media_items.clear();

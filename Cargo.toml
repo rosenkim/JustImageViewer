@@ -8,7 +8,7 @@ anyhow = "1.0"
 directories = "5"
 env_logger = "0.11"
 gl = "0.14"
-image = { version = "0.24", default-features = false, features = ["png", "jpeg"] }
+image = { version = "0.24", default-features = false, features = ["png", "jpeg", "bmp", "gif", "webp", "tiff", "tga", "ico", "pnm", "hdr", "dds", "farbfeld"] }
 imgui = "0.11"
 imgui-opengl-renderer = "0.12.1"
 imgui-sdl2 = "0.15"
