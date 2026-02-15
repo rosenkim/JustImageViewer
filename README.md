@@ -18,4 +18,4 @@ cargo run
 
 - The project uses `sdl2` with the `bundled` feature, so SDL2 is built as part of the Rust build.
 - Configuration is stored in the platform config directory (`dev/Vibe/ImageViewer/settings.toml`).
-- When `restore_last_folder = true`, the app attempts to restore the most recently opened folder on startup.
+- When `restore_last_directory = true`, the app attempts to restore the most recently opened directory on startup.

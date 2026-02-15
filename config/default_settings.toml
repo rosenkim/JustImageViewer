@@ -1,8 +1,8 @@
 # Vibe Image Viewer — default configuration
 # Copy is automatically created in the platform config directory on first launch.
 
-restore_last_folder = true
-# last_open_folder is managed by the app and populated after opening a folder.
+restore_last_directory = true
+# last_open_directory is managed by the app and populated after opening a directory.
 slideshow_interval_secs = 5
 cache_mb = 512
 prefetch_neighbors = 2

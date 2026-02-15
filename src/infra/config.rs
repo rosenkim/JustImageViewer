@@ -15,8 +15,10 @@ const CONFIG_FILENAME: &str = "settings.toml";
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct AppConfig {
-    pub restore_last_folder: bool,
-    pub last_open_folder: Option<PathBuf>,
+    #[serde(alias = "restore_last_folder")]
+    pub restore_last_directory: bool,
+    #[serde(alias = "last_open_folder")]
+    pub last_open_directory: Option<PathBuf>,
     pub slideshow_interval_secs: u64,
     pub cache_mb: u64,
     pub prefetch_neighbors: usize,
@@ -28,8 +30,8 @@ pub struct AppConfig {
 impl Default for AppConfig {
     fn default() -> Self {
         Self {
-            restore_last_folder: true,
-            last_open_folder: None,
+            restore_last_directory: true,
+            last_open_directory: None,
             slideshow_interval_secs: 5,
             cache_mb: 512,
             prefetch_neighbors: 2,

@@ -126,7 +126,7 @@ fn main() -> anyhow::Result<()> {
         14.0
     };
 
-    restore_last_folder_if_needed(&mut app_state);
+    restore_last_directory_if_needed(&mut app_state);
 
     let mut imgui = ImguiContext::create();
     imgui.set_ini_filename(None);
@@ -220,7 +220,7 @@ fn main() -> anyhow::Result<()> {
                     ..
                 } if keymod.intersects(Mod::LCTRLMOD | Mod::RCTRLMOD | Mod::LGUIMOD | Mod::RGUIMOD) =>
                 {
-                    app_state.open_folder_dialog();
+                    app_state.open_directory_dialog();
                 }
                 Event::KeyDown {
                     keycode: Some(Keycode::Right),
@@ -284,8 +284,8 @@ fn render_ui(
 ) {
     ui.main_menu_bar(|| {
         ui.menu("File", || {
-            if ui.menu_item("Open Folder...") {
-                app_state.open_folder_dialog();
+            if ui.menu_item("Open Directory...") {
+                app_state.open_directory_dialog();
             }
             if ui.menu_item("Quit") {
                 *running = false;
@@ -318,11 +318,11 @@ fn render_ui(
         .size([left_width, content_height], Condition::Always)
         .flags(window_flags)
         .build(|| {
-            if let Some(folder) = app_state.current_folder() {
-                ui.text(format!("Folder: {}", folder.display()));
+            if let Some(directory) = app_state.current_directory() {
+                ui.text(format!("Directory: {}", directory.display()));
                 ui.text(format!("Items: {}", app_state.media_items().len()));
             } else {
-                ui.text("Drag a folder/file or use File > Open Folder");
+                ui.text("Drag a directory/file or use File > Open Directory");
             }
             ui.separator();
             ui.child_window("library_scroll").size([0.0, -36.0]).build(|| {
@@ -336,8 +336,8 @@ fn render_ui(
                     }
                 }
             });
-            if ui.button("Open Folder...") {
-                app_state.open_folder_dialog();
+            if ui.button("Open Directory...") {
+                app_state.open_directory_dialog();
             }
         });
 
@@ -363,11 +363,11 @@ fn render_ui(
                         ];
                         ui.set_cursor_pos([cursor[0] + centered[0], cursor[1] + centered[1]]);
                         imgui::Image::new(texture.id, display_size).build(ui);
-                    } else if app_state.current_folder().is_some() {
+                    } else if app_state.current_directory().is_some() {
                         ui.text("No image selected or decode failed.");
                     } else {
                         ui.text("Welcome to Vibe Image Viewer");
-                        ui.text("Open an image folder to begin.");
+                        ui.text("Open an image directory to begin.");
                     }
                 });
 
@@ -401,8 +401,8 @@ fn render_ui(
             ui.text("|");
             ui.same_line();
             ui.text(format!(
-                "Restore last folder: {}",
-                if app_state.restore_last_folder() {
+                "Restore last directory: {}",
+                if app_state.restore_last_directory() {
                     "on"
                 } else {
                     "off"
@@ -415,15 +415,15 @@ fn render_ui(
     }
 }
 
-/// Try to restore the last folder from config.
-fn restore_last_folder_if_needed(app_state: &mut ViewerState) {
-    if let Some(folder) = app_state.restore_candidate().map(PathBuf::from) {
-        if folder.is_dir() {
-            app_state.load_folder(folder, None);
+/// Try to restore the last directory from config.
+fn restore_last_directory_if_needed(app_state: &mut ViewerState) {
+    if let Some(directory) = app_state.restore_candidate().map(PathBuf::from) {
+        if directory.is_dir() {
+            app_state.load_directory(directory, None);
         } else {
             log::warn!(
-                "Configured last_open_folder is not a directory: {}",
-                folder.display()
+                "Configured last_open_directory is not a directory: {}",
+                directory.display()
             );
         }
     }

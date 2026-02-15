@@ -12,7 +12,7 @@ pub struct ViewerState {
     config: AppConfig,
     config_path: PathBuf,
     status_message: String,
-    current_folder: Option<PathBuf>,
+    current_directory: Option<PathBuf>,
     media_items: Vec<MediaEntry>,
     current_index: Option<usize>,
     current_image_size: Option<(usize, usize)>,
@@ -27,7 +27,7 @@ impl ViewerState {
             config,
             config_path,
             status_message,
-            current_folder: None,
+            current_directory: None,
             media_items: Vec::new(),
             current_index: None,
             current_image_size: None,
@@ -43,23 +43,23 @@ impl ViewerState {
         &self.config_path
     }
 
-    pub fn restore_last_folder(&self) -> bool {
-        self.config.restore_last_folder
+    pub fn restore_last_directory(&self) -> bool {
+        self.config.restore_last_directory
     }
 
     pub fn restore_candidate(&self) -> Option<&Path> {
-        if !self.config.restore_last_folder {
+        if !self.config.restore_last_directory {
             return None;
         }
-        self.config.last_open_folder.as_deref()
+        self.config.last_open_directory.as_deref()
     }
 
     pub fn config(&self) -> &AppConfig {
         &self.config
     }
 
-    pub fn current_folder(&self) -> Option<&Path> {
-        self.current_folder.as_deref()
+    pub fn current_directory(&self) -> Option<&Path> {
+        self.current_directory.as_deref()
     }
 
     pub fn media_items(&self) -> &[MediaEntry] {
@@ -101,35 +101,35 @@ impl ViewerState {
         }
     }
 
-    pub fn open_folder_dialog(&mut self) {
+    pub fn open_directory_dialog(&mut self) {
         if let Some(path) = rfd::FileDialog::new().pick_folder() {
-            self.load_folder(path, None);
+            self.load_directory(path, None);
         } else {
-            self.status_message = "Folder selection cancelled".to_owned();
+            self.status_message = "Directory selection cancelled".to_owned();
         }
     }
 
     pub fn handle_drop_path(&mut self, path: &Path) {
         if path.is_dir() {
-            self.load_folder(path.to_path_buf(), None);
+            self.load_directory(path.to_path_buf(), None);
         } else if path.is_file() && let Some(parent) = path.parent() {
-            self.load_folder(parent.to_path_buf(), Some(path.to_path_buf()));
+            self.load_directory(parent.to_path_buf(), Some(path.to_path_buf()));
         }
     }
 
-    /// Load images from a folder and choose which image to focus first.
-    pub fn load_folder(&mut self, folder: PathBuf, focus_file: Option<PathBuf>) {
-        let folder_display = folder.display().to_string();
-        match media::scan_directory(&folder) {
+    /// Load images from a directory and choose which image to focus first.
+    pub fn load_directory(&mut self, directory: PathBuf, focus_file: Option<PathBuf>) {
+        let directory_display = directory.display().to_string();
+        match media::scan_directory(&directory) {
             Ok(entries) => {
                 let total = entries.len();
                 if total == 0 {
                     self.status_message = format!(
                         "No supported images in {} (PNG, JPEG, BMP, GIF, WebP, TIFF, TGA, ICO, PNM, HDR, DDS, Farbfeld)",
-                        folder_display
+                        directory_display
                     );
-                    self.config.last_open_folder = Some(folder.clone());
-                    self.current_folder = Some(folder);
+                    self.config.last_open_directory = Some(directory.clone());
+                    self.current_directory = Some(directory);
                     self.media_items.clear();
                     self.current_index = None;
                     self.current_image_size = None;
@@ -142,17 +142,17 @@ impl ViewerState {
                     .and_then(|target| entries.iter().position(|entry| entry.path == *target))
                     .or(Some(0));
 
-                self.config.last_open_folder = Some(folder.clone());
-                self.current_folder = Some(folder);
+                self.config.last_open_directory = Some(directory.clone());
+                self.current_directory = Some(directory);
                 self.media_items = entries;
                 self.current_index = focus_index;
                 self.current_image_size = None;
-                self.status_message = format!("Loaded {} images from {}", total, folder_display);
+                self.status_message = format!("Loaded {} images from {}", total, directory_display);
                 self.needs_image_reload = true;
             }
             Err(err) => {
-                self.status_message = format!("Failed to read {}: {:#}", folder_display, err);
-                log::error!("Failed to load folder {}: {:#}", folder_display, err);
+                self.status_message = format!("Failed to read {}: {:#}", directory_display, err);
+                log::error!("Failed to load directory {}: {:#}", directory_display, err);
             }
         }
     }
