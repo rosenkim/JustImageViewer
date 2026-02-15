@@ -12,6 +12,8 @@ pub struct ViewerState {
     config: AppConfig,
     config_path: PathBuf,
     status_message: String,
+    show_library: bool,
+    show_info: bool,
     current_directory: Option<PathBuf>,
     media_items: Vec<MediaEntry>,
     current_index: Option<usize>,
@@ -27,6 +29,8 @@ impl ViewerState {
             config,
             config_path,
             status_message,
+            show_library: true,
+            show_info: true,
             current_directory: None,
             media_items: Vec::new(),
             current_index: None,
@@ -37,6 +41,22 @@ impl ViewerState {
 
     pub fn status_message(&self) -> &str {
         &self.status_message
+    }
+
+    pub fn show_library(&self) -> bool {
+        self.show_library
+    }
+
+    pub fn set_show_library(&mut self, show: bool) {
+        self.show_library = show;
+    }
+
+    pub fn show_info(&self) -> bool {
+        self.show_info
+    }
+
+    pub fn set_show_info(&mut self, show: bool) {
+        self.show_info = show;
     }
 
     pub fn config_path(&self) -> &Path {

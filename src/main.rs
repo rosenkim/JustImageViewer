@@ -227,11 +227,19 @@ fn main() -> anyhow::Result<()> {
                     ..
                 }
                 | Event::KeyDown {
+                    keycode: Some(Keycode::Down),
+                    ..
+                }
+                | Event::KeyDown {
                     keycode: Some(Keycode::PageDown),
                     ..
                 } => app_state.advance_selection(1),
                 Event::KeyDown {
                     keycode: Some(Keycode::Left),
+                    ..
+                }
+                | Event::KeyDown {
+                    keycode: Some(Keycode::Up),
                     ..
                 }
                 | Event::KeyDown {
@@ -292,7 +300,17 @@ fn render_ui(
             }
         });
         ui.menu("View", || {
-            ui.text("Zoom/Fit toggles coming soon");
+            let mut show_library = app_state.show_library();
+            if ui.menu_item_config("Library").selected(show_library).build() {
+                show_library = !show_library;
+                app_state.set_show_library(show_library);
+            }
+
+            let mut show_info = app_state.show_info();
+            if ui.menu_item_config("Info").selected(show_info).build() {
+                show_info = !show_info;
+                app_state.set_show_info(show_info);
+            }
         });
         ui.menu("Help", || {
             if ui.menu_item("Keyboard Shortcuts") {
@@ -304,7 +322,7 @@ fn render_ui(
     let display = ui.io().display_size;
     let menu_height = 24.0;
     let status_height = 34.0;
-    let left_width = 300.0;
+    let left_width = if app_state.show_library() { 300.0 } else { 0.0 };
     let content_height = (display[1] - menu_height - status_height).max(120.0);
     let viewer_width = (display[0] - left_width).max(220.0);
     let window_flags = imgui::WindowFlags::NO_MOVE
@@ -313,40 +331,42 @@ fn render_ui(
 
     let mut clicked_index: Option<usize> = None;
 
-    ui.window("Library")
-        .position([0.0, menu_height], Condition::Always)
-        .size([left_width, content_height], Condition::Always)
-        .flags(window_flags)
-        .build(|| {
-            if let Some(directory) = app_state.current_directory() {
-                ui.text(format!("Directory: {}", directory.display()));
-                ui.text(format!("Items: {}", app_state.media_items().len()));
-            } else {
-                ui.text("Drag a directory/file or use File > Open Directory");
-            }
-            ui.separator();
-            ui.child_window("library_scroll").size([0.0, -36.0]).build(|| {
-                for (index, entry) in app_state.media_items().iter().enumerate() {
-                    if ui
-                        .selectable_config(&entry.file_name)
-                        .selected(app_state.current_index() == Some(index))
-                        .build()
-                    {
-                        clicked_index = Some(index);
+    if app_state.show_library() {
+        ui.window("Library")
+            .position([0.0, menu_height], Condition::Always)
+            .size([left_width, content_height], Condition::Always)
+            .flags(window_flags)
+            .build(|| {
+                if let Some(directory) = app_state.current_directory() {
+                    ui.text(format!("Directory: {}", directory.display()));
+                    ui.text(format!("Items: {}", app_state.media_items().len()));
+                } else {
+                    ui.text("Drag a directory/file or use File > Open Directory");
+                }
+                ui.separator();
+                ui.child_window("library_scroll").size([0.0, -36.0]).build(|| {
+                    for (index, entry) in app_state.media_items().iter().enumerate() {
+                        if ui
+                            .selectable_config(&entry.file_name)
+                            .selected(app_state.current_index() == Some(index))
+                            .build()
+                        {
+                            clicked_index = Some(index);
+                        }
                     }
+                });
+                if ui.button("Open Directory...") {
+                    app_state.open_directory_dialog();
                 }
             });
-            if ui.button("Open Directory...") {
-                app_state.open_directory_dialog();
-            }
-        });
+    }
 
     ui.window("Viewer")
         .position([left_width, menu_height], Condition::Always)
         .size([viewer_width, content_height], Condition::Always)
         .flags(window_flags)
         .build(|| {
-            let metadata_height = 86.0;
+            let metadata_height = if app_state.show_info() { 86.0 } else { 0.0 };
             ui.child_window("image_region")
                 .size([0.0, -metadata_height])
                 .build(|| {
@@ -371,19 +391,21 @@ fn render_ui(
                     }
                 });
 
-            ui.separator();
-            if let Some(entry) = app_state.current_entry() {
-                ui.text(format!("File: {}", entry.file_name));
-                ui.text(format!(
-                    "Format: {}  Size: {}",
-                    entry.format.as_str(),
-                    format_file_size(entry.file_size)
-                ));
-                if let Some((w, h)) = app_state.current_image_size() {
-                    ui.text(format!("Resolution: {} x {}", w, h));
+            if app_state.show_info() {
+                ui.separator();
+                if let Some(entry) = app_state.current_entry() {
+                    ui.text(format!("File: {}", entry.file_name));
+                    ui.text(format!(
+                        "Format: {}  Size: {}",
+                        entry.format.as_str(),
+                        format_file_size(entry.file_size)
+                    ));
+                    if let Some((w, h)) = app_state.current_image_size() {
+                        ui.text(format!("Resolution: {} x {}", w, h));
+                    }
+                } else {
+                    ui.text("No file selected");
                 }
-            } else {
-                ui.text("No file selected");
             }
         });
 
