@@ -20,6 +20,8 @@ pub struct AppConfig {
     pub slideshow_interval_secs: u64,
     pub cache_mb: u64,
     pub prefetch_neighbors: usize,
+    pub ui_font_filename: String,
+    pub ui_font_size_pixels: f32,
     pub background_style: BackgroundStyle,
 }
 
@@ -31,6 +33,8 @@ impl Default for AppConfig {
             slideshow_interval_secs: 5,
             cache_mb: 512,
             prefetch_neighbors: 2,
+            ui_font_filename: String::new(),
+            ui_font_size_pixels: 14.0,
             background_style: BackgroundStyle::default(),
         }
     }
@@ -72,7 +76,7 @@ pub struct ConfigHandle {
 }
 
 /// Load config file, or create one from template on first run.
-pub fn load_or_create() -> Result<ConfigHandle> {
+pub fn load_or_create(reset_config: bool) -> Result<ConfigHandle> {
     let Some(dirs) = ProjectDirs::from(QUALIFIER, ORGANIZATION, APPLICATION) else {
         return Err(anyhow::anyhow!(
             "failed to determine configuration directory for {QUALIFIER}.{ORGANIZATION}.{APPLICATION}"
@@ -89,7 +93,7 @@ pub fn load_or_create() -> Result<ConfigHandle> {
 
     let config_path = config_dir.join(CONFIG_FILENAME);
 
-    if !config_path.exists() {
+    if reset_config || !config_path.exists() {
         let template = default_template();
         fs::write(&config_path, template).with_context(|| {
             format!(

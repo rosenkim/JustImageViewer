@@ -5,7 +5,7 @@ mod core;
 mod infra;
 mod render;
 
-use anyhow::Context;
+use anyhow::{Context, bail};
 use app::{ViewerState, format_file_size};
 use imgui::{Condition, Context as ImguiContext, FontConfig, FontGlyphRanges, FontSource};
 use sdl2::{
@@ -14,16 +14,49 @@ use sdl2::{
     video::GLProfile,
 };
 use std::path::PathBuf;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use crate::render::texture_manager::{TextureManager, UploadedTexture};
 
+const DEFAULT_RENDER_FPS: u32 = 60;
+
+#[derive(Debug, Default)]
+struct AppArgs {
+    reset_config: bool,
+}
+
+fn parse_args() -> anyhow::Result<AppArgs> {
+    let mut args = AppArgs::default();
+    for arg in std::env::args().skip(1) {
+        match arg.as_str() {
+            "--reset-config" => args.reset_config = true,
+            "-h" | "--help" => {
+                println!("Usage: image-viewer [--reset-config]");
+                println!("  --reset-config  overwrite saved settings with default_settings.toml");
+                std::process::exit(0);
+            }
+            _ => {
+                bail!(
+                    "unknown argument: {arg}\nUsage: image-viewer [--reset-config]"
+                );
+            }
+        }
+    }
+    Ok(args)
+}
+
 /// App entrypoint: setup systems, run UI loop, then save config.
 fn main() -> anyhow::Result<()> {
+    let args = parse_args().context("failed to parse command line arguments")?;
+
     infra::logging::init();
 
-    let config_handle =
-        infra::config::load_or_create().context("unable to prepare application configuration")?;
+    let config_handle = infra::config::load_or_create(args.reset_config)
+        .context("unable to prepare application configuration")?;
+
+    if args.reset_config {
+        log::info!("--reset-config was set; configuration reset to bundled defaults");
+    }
 
     log::info!("Loaded configuration from {}", config_handle.path.display());
 
@@ -70,19 +103,48 @@ fn main() -> anyhow::Result<()> {
     let mut texture_manager = TextureManager::new(max_texture_size);
     let mut current_texture: Option<UploadedTexture> = None;
 
+    // Calculate DPI scale for Retina/HiDPI displays
+    let (drawable_w, _) = window.drawable_size();
+    let (window_w, _) = window.size();
+    let dpi_scale = if window_w > 0 {
+        drawable_w as f32 / window_w as f32
+    } else {
+        1.0
+    };
+    if dpi_scale != 1.0 {
+        log::info!("Detected DPI scale: {:.2}", dpi_scale);
+    }
+
+    let ui_font_filename = app_state.config().ui_font_filename.clone();
+    let ui_font_size_pixels = if app_state.config().ui_font_size_pixels > 0.0 {
+        app_state.config().ui_font_size_pixels
+    } else {
+        log::warn!(
+            "Invalid ui_font_size_pixels ({}). Falling back to 14.0",
+            app_state.config().ui_font_size_pixels
+        );
+        14.0
+    };
+
     restore_last_folder_if_needed(&mut app_state);
 
     let mut imgui = ImguiContext::create();
     imgui.set_ini_filename(None);
     imgui.style_mut().use_dark_colors();
 
-    // Load custom font (place your .ttf file at assets/fonts/)
+    // Apply inverse scaling to font_global_scale so layout size remains consistent
+    // while using a high-resolution font texture.
+    if dpi_scale != 1.0 {
+        imgui.io_mut().font_global_scale = 1.0 / dpi_scale;
+    }
+
+    // Load custom font (from config, under assets/fonts/)
     let font_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("assets")
         .join("fonts")
-        .join("NanumGothic.ttf");
+        .join(&ui_font_filename);
 
-    if font_path.exists() {
+    if !ui_font_filename.is_empty() && font_path.exists() {
         let font_data = std::fs::read(&font_path)
             .expect("failed to read custom font file");
         // Leak the data so it lives for the entire program lifetime.
@@ -92,7 +154,7 @@ fn main() -> anyhow::Result<()> {
         imgui.fonts().add_font(&[
             FontSource::TtfData {
                 data: font_data,
-                size_pixels: 14.0,
+                size_pixels: ui_font_size_pixels * dpi_scale,
                 config: Some(FontConfig {
                     glyph_ranges: FontGlyphRanges::from_slice(&[
                         // Basic Latin + Latin Supplement
@@ -112,7 +174,12 @@ fn main() -> anyhow::Result<()> {
                 }),
             },
         ]);
-        log::info!("Custom font loaded: {}", font_path.display());
+        log::info!(
+            "Custom font loaded: {} ({} px, scale: {:.2})",
+            font_path.display(),
+            ui_font_size_pixels * dpi_scale,
+            dpi_scale
+        );
     } else {
         log::warn!(
             "Custom font not found at {}, using default imgui font",
@@ -176,7 +243,12 @@ fn main() -> anyhow::Result<()> {
         }
 
         let now = Instant::now();
-        imgui.io_mut().update_delta_time(now - last_frame);
+        let min_frame_time = Duration::from_secs_f32(1.0 / DEFAULT_RENDER_FPS as f32);
+        let delta_time = now - last_frame;
+        if delta_time < min_frame_time {
+            continue;
+        }
+        imgui.io_mut().update_delta_time(delta_time);
         last_frame = now;
 
         imgui_sdl2.prepare_frame(imgui.io_mut(), &window, &event_pump.mouse_state());
@@ -186,141 +258,7 @@ fn main() -> anyhow::Result<()> {
         }
 
         let ui = imgui.frame();
-
-        ui.main_menu_bar(|| {
-            ui.menu("File", || {
-                if ui.menu_item("Open Folder...") {
-                    app_state.open_folder_dialog();
-                }
-                if ui.menu_item("Quit") {
-                    running = false;
-                }
-            });
-            ui.menu("View", || {
-                ui.text("Zoom/Fit toggles coming soon");
-            });
-            ui.menu("Help", || {
-                if ui.menu_item("Keyboard Shortcuts") {
-                    log::info!("Keyboard shortcuts overlay not implemented yet");
-                }
-            });
-        });
-
-        let display = ui.io().display_size;
-        let menu_height = 24.0;
-        let status_height = 34.0;
-        let left_width = 300.0;
-        let content_height = (display[1] - menu_height - status_height).max(120.0);
-        let viewer_width = (display[0] - left_width).max(220.0);
-        let window_flags = imgui::WindowFlags::NO_MOVE
-            | imgui::WindowFlags::NO_RESIZE
-            | imgui::WindowFlags::NO_COLLAPSE;
-
-        let mut clicked_index: Option<usize> = None;
-
-        ui.window("Library")
-            .position([0.0, menu_height], Condition::Always)
-            .size([left_width, content_height], Condition::Always)
-            .flags(window_flags)
-            .build(|| {
-                if let Some(folder) = app_state.current_folder() {
-                    ui.text(format!("Folder: {}", folder.display()));
-                    ui.text(format!("Items: {}", app_state.media_items().len()));
-                } else {
-                    ui.text("Drag a folder/file or use File > Open Folder");
-                }
-                ui.separator();
-                ui.child_window("library_scroll")
-                    .size([0.0, -36.0])
-                    .build(|| {
-                        for (index, entry) in app_state.media_items().iter().enumerate() {
-                            if ui
-                                .selectable_config(&entry.file_name)
-                                .selected(app_state.current_index() == Some(index))
-                                .build()
-                            {
-                                clicked_index = Some(index);
-                            }
-                        }
-                    });
-                if ui.button("Open Folder...") {
-                    app_state.open_folder_dialog();
-                }
-            });
-
-        ui.window("Viewer")
-            .position([left_width, menu_height], Condition::Always)
-            .size([viewer_width, content_height], Condition::Always)
-            .flags(window_flags)
-            .build(|| {
-                let metadata_height = 86.0;
-                ui.child_window("image_region")
-                    .size([0.0, -metadata_height])
-                    .build(|| {
-                        if let Some(texture) = current_texture {
-                            let avail = ui.content_region_avail();
-                            let width_scale = avail[0] / texture.width as f32;
-                            let height_scale = avail[1] / texture.height as f32;
-                            let scale = width_scale.min(height_scale).min(1.0).max(0.01);
-                            let display_size =
-                                [texture.width as f32 * scale, texture.height as f32 * scale];
-                            let cursor = ui.cursor_pos();
-                            let centered = [
-                                (avail[0] - display_size[0]).max(0.0) * 0.5,
-                                (avail[1] - display_size[1]).max(0.0) * 0.5,
-                            ];
-                            ui.set_cursor_pos([cursor[0] + centered[0], cursor[1] + centered[1]]);
-                            imgui::Image::new(texture.id, display_size).build(ui);
-                        } else if app_state.current_folder().is_some() {
-                            ui.text("No image selected or decode failed.");
-                        } else {
-                            ui.text("Welcome to Vibe Image Viewer");
-                            ui.text("Open a PNG/JPEG folder to begin.");
-                        }
-                    });
-
-                ui.separator();
-                if let Some(entry) = app_state.current_entry() {
-                    ui.text(format!("File: {}", entry.file_name));
-                    ui.text(format!(
-                        "Format: {}  Size: {}",
-                        entry.format.as_str(),
-                        format_file_size(entry.file_size)
-                    ));
-                    if let Some((w, h)) = app_state.current_image_size() {
-                        ui.text(format!("Resolution: {} x {}", w, h));
-                    }
-                } else {
-                    ui.text("No file selected");
-                }
-            });
-
-        ui.window("Status")
-            .position([0.0, menu_height + content_height], Condition::Always)
-            .size([display[0], status_height], Condition::Always)
-            .flags(window_flags | imgui::WindowFlags::NO_TITLE_BAR)
-            .build(|| {
-                ui.text(format!("Status: {}", app_state.status_message()));
-                ui.same_line();
-                ui.text("|");
-                ui.same_line();
-                ui.text(format!("Config: {}", app_state.config_path().display()));
-                ui.same_line();
-                ui.text("|");
-                ui.same_line();
-                ui.text(format!(
-                    "Restore last folder: {}",
-                    if app_state.restore_last_folder() {
-                        "on"
-                    } else {
-                        "off"
-                    }
-                ));
-            });
-
-        if let Some(index) = clicked_index {
-            app_state.select_index(index);
-        }
+        render_ui(ui, &mut app_state, current_texture, &mut running);
 
         imgui_sdl2.prepare_render(ui, &window);
         unsafe {
@@ -336,6 +274,145 @@ fn main() -> anyhow::Result<()> {
         .context("failed to persist application configuration")?;
 
     Ok(())
+}
+
+fn render_ui(
+    ui: &imgui::Ui,
+    app_state: &mut ViewerState,
+    current_texture: Option<UploadedTexture>,
+    running: &mut bool,
+) {
+    ui.main_menu_bar(|| {
+        ui.menu("File", || {
+            if ui.menu_item("Open Folder...") {
+                app_state.open_folder_dialog();
+            }
+            if ui.menu_item("Quit") {
+                *running = false;
+            }
+        });
+        ui.menu("View", || {
+            ui.text("Zoom/Fit toggles coming soon");
+        });
+        ui.menu("Help", || {
+            if ui.menu_item("Keyboard Shortcuts") {
+                log::info!("Keyboard shortcuts overlay not implemented yet");
+            }
+        });
+    });
+
+    let display = ui.io().display_size;
+    let menu_height = 24.0;
+    let status_height = 34.0;
+    let left_width = 300.0;
+    let content_height = (display[1] - menu_height - status_height).max(120.0);
+    let viewer_width = (display[0] - left_width).max(220.0);
+    let window_flags = imgui::WindowFlags::NO_MOVE
+        | imgui::WindowFlags::NO_RESIZE
+        | imgui::WindowFlags::NO_COLLAPSE;
+
+    let mut clicked_index: Option<usize> = None;
+
+    ui.window("Library")
+        .position([0.0, menu_height], Condition::Always)
+        .size([left_width, content_height], Condition::Always)
+        .flags(window_flags)
+        .build(|| {
+            if let Some(folder) = app_state.current_folder() {
+                ui.text(format!("Folder: {}", folder.display()));
+                ui.text(format!("Items: {}", app_state.media_items().len()));
+            } else {
+                ui.text("Drag a folder/file or use File > Open Folder");
+            }
+            ui.separator();
+            ui.child_window("library_scroll").size([0.0, -36.0]).build(|| {
+                for (index, entry) in app_state.media_items().iter().enumerate() {
+                    if ui
+                        .selectable_config(&entry.file_name)
+                        .selected(app_state.current_index() == Some(index))
+                        .build()
+                    {
+                        clicked_index = Some(index);
+                    }
+                }
+            });
+            if ui.button("Open Folder...") {
+                app_state.open_folder_dialog();
+            }
+        });
+
+    ui.window("Viewer")
+        .position([left_width, menu_height], Condition::Always)
+        .size([viewer_width, content_height], Condition::Always)
+        .flags(window_flags)
+        .build(|| {
+            let metadata_height = 86.0;
+            ui.child_window("image_region")
+                .size([0.0, -metadata_height])
+                .build(|| {
+                    if let Some(texture) = current_texture {
+                        let avail = ui.content_region_avail();
+                        let width_scale = avail[0] / texture.width as f32;
+                        let height_scale = avail[1] / texture.height as f32;
+                        let scale = width_scale.min(height_scale).min(1.0).max(0.01);
+                        let display_size = [texture.width as f32 * scale, texture.height as f32 * scale];
+                        let cursor = ui.cursor_pos();
+                        let centered = [
+                            (avail[0] - display_size[0]).max(0.0) * 0.5,
+                            (avail[1] - display_size[1]).max(0.0) * 0.5,
+                        ];
+                        ui.set_cursor_pos([cursor[0] + centered[0], cursor[1] + centered[1]]);
+                        imgui::Image::new(texture.id, display_size).build(ui);
+                    } else if app_state.current_folder().is_some() {
+                        ui.text("No image selected or decode failed.");
+                    } else {
+                        ui.text("Welcome to Vibe Image Viewer");
+                        ui.text("Open a PNG/JPEG folder to begin.");
+                    }
+                });
+
+            ui.separator();
+            if let Some(entry) = app_state.current_entry() {
+                ui.text(format!("File: {}", entry.file_name));
+                ui.text(format!(
+                    "Format: {}  Size: {}",
+                    entry.format.as_str(),
+                    format_file_size(entry.file_size)
+                ));
+                if let Some((w, h)) = app_state.current_image_size() {
+                    ui.text(format!("Resolution: {} x {}", w, h));
+                }
+            } else {
+                ui.text("No file selected");
+            }
+        });
+
+    ui.window("Status")
+        .position([0.0, menu_height + content_height], Condition::Always)
+        .size([display[0], status_height], Condition::Always)
+        .flags(window_flags | imgui::WindowFlags::NO_TITLE_BAR)
+        .build(|| {
+            ui.text(format!("Status: {}", app_state.status_message()));
+            ui.same_line();
+            ui.text("|");
+            ui.same_line();
+            ui.text(format!("Config: {}", app_state.config_path().display()));
+            ui.same_line();
+            ui.text("|");
+            ui.same_line();
+            ui.text(format!(
+                "Restore last folder: {}",
+                if app_state.restore_last_folder() {
+                    "on"
+                } else {
+                    "off"
+                }
+            ));
+        });
+
+    if let Some(index) = clicked_index {
+        app_state.select_index(index);
+    }
 }
 
 /// Try to restore the last folder from config.

@@ -6,6 +6,10 @@ restore_last_folder = true
 slideshow_interval_secs = 5
 cache_mb = 512
 prefetch_neighbors = 2
+# Font file name under assets/fonts
+ui_font_filename = "NanumGothic.ttf"
+# UI font size in pixels
+ui_font_size_pixels = 14.0
 
 [background_style]
 # mode can be "checker" or "solid"
