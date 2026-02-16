@@ -19,9 +19,6 @@ pub struct AppConfig {
     pub restore_last_directory: bool,
     #[serde(alias = "last_open_folder")]
     pub last_open_directory: Option<PathBuf>,
-    pub slideshow_interval_secs: u64,
-    pub cache_mb: u64,
-    pub prefetch_neighbors: usize,
     pub ui_font_filename: String,
     pub ui_font_size_pixels: f32,
     pub background_style: BackgroundStyle,
@@ -32,9 +29,6 @@ impl Default for AppConfig {
         Self {
             restore_last_directory: true,
             last_open_directory: None,
-            slideshow_interval_secs: 5,
-            cache_mb: 512,
-            prefetch_neighbors: 2,
             ui_font_filename: String::new(),
             ui_font_size_pixels: 14.0,
             background_style: BackgroundStyle::default(),

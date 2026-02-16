@@ -19,6 +19,7 @@ pub struct ViewerState {
     current_index: Option<usize>,
     current_image_size: Option<(usize, usize)>,
     needs_image_reload: bool,
+    library_width: f32,
 }
 
 impl ViewerState {
@@ -36,6 +37,7 @@ impl ViewerState {
             current_index: None,
             current_image_size: None,
             needs_image_reload: false,
+            library_width: 300.0,
         }
     }
 
@@ -98,6 +100,14 @@ impl ViewerState {
         self.current_image_size
     }
 
+    pub fn library_width(&self) -> f32 {
+        self.library_width
+    }
+
+    pub fn set_library_width(&mut self, width: f32) {
+        self.library_width = width;
+    }
+
     pub fn select_index(&mut self, index: usize) {
         if index < self.media_items.len() {
             self.current_index = Some(index);
@@ -127,6 +137,16 @@ impl ViewerState {
         } else {
             self.status_message = "Directory selection cancelled".to_owned();
         }
+    }
+
+    pub fn refresh_current_directory(&mut self) {
+        let Some(directory) = self.current_directory.clone() else {
+            self.status_message = "No directory is currently open".to_owned();
+            return;
+        };
+
+        let focus_file = self.current_entry().map(|entry| entry.path.clone());
+        self.load_directory(directory, focus_file);
     }
 
     pub fn handle_drop_path(&mut self, path: &Path) {

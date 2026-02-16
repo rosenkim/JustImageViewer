@@ -3,9 +3,7 @@
 
 restore_last_directory = true
 # last_open_directory is managed by the app and populated after opening a directory.
-slideshow_interval_secs = 5
-cache_mb = 512
-prefetch_neighbors = 2
+# slideshow_interval_secs = 5
 # Font file name under assets/fonts
 ui_font_filename = "NanumGothic.ttf"
 # UI font size in pixels
