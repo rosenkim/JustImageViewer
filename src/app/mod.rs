@@ -8,6 +8,13 @@ use crate::{
     infra::config::AppConfig,
 };
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ImageViewMode {
+    Original,
+    FitToWindow,
+    FitToWidth,
+}
+
 pub struct ViewerState {
     config: AppConfig,
     config_path: PathBuf,
@@ -20,6 +27,7 @@ pub struct ViewerState {
     current_image_size: Option<(usize, usize)>,
     needs_image_reload: bool,
     library_width: f32,
+    image_view_mode: ImageViewMode,
 }
 
 impl ViewerState {
@@ -38,6 +46,7 @@ impl ViewerState {
             current_image_size: None,
             needs_image_reload: false,
             library_width: 300.0,
+            image_view_mode: ImageViewMode::FitToWindow,
         }
     }
 
@@ -106,6 +115,14 @@ impl ViewerState {
 
     pub fn set_library_width(&mut self, width: f32) {
         self.library_width = width;
+    }
+
+    pub fn image_view_mode(&self) -> ImageViewMode {
+        self.image_view_mode
+    }
+
+    pub fn set_image_view_mode(&mut self, mode: ImageViewMode) {
+        self.image_view_mode = mode;
     }
 
     pub fn select_index(&mut self, index: usize) {

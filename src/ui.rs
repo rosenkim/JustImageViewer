@@ -1,4 +1,4 @@
-use crate::app::{ViewerState, format_file_size};
+use crate::app::{ImageViewMode, ViewerState, format_file_size};
 use crate::render::texture_manager::UploadedTexture;
 use imgui::{Condition, MouseCursor, StyleVar};
 
@@ -22,17 +22,43 @@ pub fn render_ui(
             }
         });
         ui.menu("View", || {
-            let mut show_library = app_state.show_library();
-            if ui.menu_item_config("Library").selected(show_library).build() {
-                show_library = !show_library;
-                app_state.set_show_library(show_library);
-            }
+            ui.menu("Layout", || {
+                let mut show_library = app_state.show_library();
+                if ui.menu_item_config("Library").selected(show_library).build() {
+                    show_library = !show_library;
+                    app_state.set_show_library(show_library);
+                }
 
-            let mut show_info = app_state.show_info();
-            if ui.menu_item_config("Info").selected(show_info).build() {
-                show_info = !show_info;
-                app_state.set_show_info(show_info);
-            }
+                let mut show_info = app_state.show_info();
+                if ui.menu_item_config("Info").selected(show_info).build() {
+                    show_info = !show_info;
+                    app_state.set_show_info(show_info);
+                }
+            });
+            ui.menu("Image", || {
+                let image_mode = app_state.image_view_mode();
+                if ui
+                    .selectable_config("Original")
+                    .selected(image_mode == ImageViewMode::Original)
+                    .build()
+                {
+                    app_state.set_image_view_mode(ImageViewMode::Original);
+                }
+                if ui
+                    .selectable_config("Fit to Window")
+                    .selected(image_mode == ImageViewMode::FitToWindow)
+                    .build()
+                {
+                    app_state.set_image_view_mode(ImageViewMode::FitToWindow);
+                }
+                if ui
+                    .selectable_config("Fit to Width")
+                    .selected(image_mode == ImageViewMode::FitToWidth)
+                    .build()
+                {
+                    app_state.set_image_view_mode(ImageViewMode::FitToWidth);
+                }
+            });
         });
         ui.menu("Help", || {
             if ui.menu_item("Keyboard Shortcuts") {
@@ -42,8 +68,8 @@ pub fn render_ui(
     });
 
     let display = ui.io().display_size;
-    let menu_height = 24.0;
-    let status_height = 34.0;
+    let menu_height = 20.0;
+    let status_height = 28.0;
     let content_height = (display[1] - menu_height - status_height).max(120.0);
     let window_flags = imgui::WindowFlags::NO_MOVE
         | imgui::WindowFlags::NO_RESIZE
@@ -144,12 +170,18 @@ pub fn render_ui(
                     let metadata_height = if app_state.show_info() { 86.0 } else { 0.0 };
                     ui.child_window("image_region")
                         .size([0.0, -metadata_height])
+                        .flags(imgui::WindowFlags::HORIZONTAL_SCROLLBAR)
                         .build(|| {
                             if let Some(texture) = current_texture {
                                 let avail = ui.content_region_avail();
                                 let width_scale = avail[0] / texture.width as f32;
                                 let height_scale = avail[1] / texture.height as f32;
-                                let scale = width_scale.min(height_scale).min(1.0).max(0.01);
+                                let scale = match app_state.image_view_mode() {
+                                    ImageViewMode::Original => 1.0,
+                                    ImageViewMode::FitToWindow => width_scale.min(height_scale),
+                                    ImageViewMode::FitToWidth => width_scale,
+                                }
+                                .max(0.01);
                                 let display_size = [
                                     texture.width as f32 * scale,
                                     texture.height as f32 * scale,
