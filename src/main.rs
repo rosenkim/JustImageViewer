@@ -7,21 +7,23 @@ mod render;
 
 use anyhow::{Context, bail};
 use app::{ViewerState, format_file_size};
-use imgui::{
-    Condition, Context as ImguiContext, FontConfig, FontGlyphRanges, FontSource, MouseCursor,
-    StyleVar,
-};
-use sdl2::{
-    event::Event,
-    keyboard::{Keycode, Mod},
-    video::GLProfile,
-};
+use imgui::{Condition, Context as ImguiContext, FontConfig, FontGlyphRanges, FontSource, MouseCursor, StyleVar};
+use imgui_wgpu::RendererConfig;
+use imgui_winit_support::{HiDpiMode, WinitPlatform};
 use std::path::PathBuf;
-use std::time::{Duration, Instant};
+use std::sync::Arc;
+use std::time::Instant;
+use wgpu::{CompositeAlphaMode, Device, Queue, Surface, SurfaceConfiguration, SurfaceError};
+use winit::{
+    dpi::LogicalSize,
+    event::{ElementState, Event, WindowEvent},
+    event_loop::EventLoop,
+    keyboard::{KeyCode, ModifiersState, PhysicalKey},
+    window::WindowBuilder,
+};
 
 use crate::render::texture_manager::{TextureManager, UploadedTexture};
 
-const DEFAULT_RENDER_FPS: u32 = 60;
 const SPLITTER_WIDTH: f32 = 6.0;
 const MIN_LIBRARY_WIDTH: f32 = 220.0;
 const MIN_VIEWER_WIDTH: f32 = 280.0;
@@ -66,60 +68,50 @@ fn main() -> anyhow::Result<()> {
 
     log::info!("Loaded configuration from {}", config_handle.path.display());
 
-    let sdl = sdl2::init().map_err(anyhow::Error::msg)?;
-    let video = sdl.video().map_err(anyhow::Error::msg)?;
-
-    let gl_attr = video.gl_attr();
-    gl_attr.set_context_profile(GLProfile::Core);
-    gl_attr.set_context_version(3, 3);
-
-    let window = video
-        .window("Vibe Image Viewer", 1280, 800)
-        .opengl()
-        .resizable()
-        .allow_highdpi()
-        .position_centered()
-        .build()
-        .map_err(anyhow::Error::msg)
-        .context("failed to create SDL2 window")?;
-
-    let gl_context = window
-        .gl_create_context()
-        .map_err(anyhow::Error::msg)
-        .context("failed to create OpenGL context")?;
-    window
-        .gl_make_current(&gl_context)
-        .map_err(anyhow::Error::msg)
-        .context("failed to bind OpenGL context")?;
-
-    if let Err(err) = video.gl_set_swap_interval(1) {
-        log::warn!("Failed to enable vsync: {}", err);
-    }
-
-    gl::load_with(|symbol| video.gl_get_proc_address(symbol) as *const _);
-
-    let max_texture_size = unsafe {
-        let mut size: i32 = 0;
-        gl::GetIntegerv(gl::MAX_TEXTURE_SIZE, &mut size);
-        size
-    };
-    log::info!("OpenGL max texture size: {}x{}", max_texture_size, max_texture_size);
-
     let mut app_state = ViewerState::new(config_handle.path, config_handle.settings);
-    let mut texture_manager = TextureManager::new(max_texture_size);
-    let mut current_texture: Option<UploadedTexture> = None;
+    restore_last_directory_if_needed(&mut app_state);
 
-    // Calculate DPI scale for Retina/HiDPI displays
-    let (drawable_w, _) = window.drawable_size();
-    let (window_w, _) = window.size();
-    let dpi_scale = if window_w > 0 {
-        drawable_w as f32 / window_w as f32
-    } else {
-        1.0
-    };
-    if dpi_scale != 1.0 {
-        log::info!("Detected DPI scale: {:.2}", dpi_scale);
-    }
+    let event_loop = EventLoop::new().map_err(anyhow::Error::msg)?;
+    let window = Arc::new(
+        WindowBuilder::new()
+            .with_title("Vibe Image Viewer")
+            .with_inner_size(LogicalSize::new(1280.0, 800.0))
+            .with_resizable(true)
+            .build(&event_loop)
+            .map_err(anyhow::Error::msg)
+            .context("failed to create window")?,
+    );
+
+    let instance = wgpu::Instance::default();
+    let surface = instance
+        .create_surface(window.clone())
+        .context("failed to create wgpu surface")?;
+
+    let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
+        power_preference: wgpu::PowerPreference::HighPerformance,
+        compatible_surface: Some(&surface),
+        force_fallback_adapter: false,
+    }))
+    .context("failed to request wgpu adapter")?;
+
+    let (device, queue) = pollster::block_on(adapter.request_device(
+        &wgpu::DeviceDescriptor {
+            label: Some("image-viewer device"),
+            required_features: wgpu::Features::empty(),
+            required_limits: wgpu::Limits::default(),
+            memory_hints: wgpu::MemoryHints::MemoryUsage,
+            trace: wgpu::Trace::Off,
+        },
+    ))
+    .context("failed to request wgpu device")?;
+
+    let mut surface_config = create_surface_config(&surface, &adapter, window.inner_size())
+        .context("failed to configure surface")?;
+    surface.configure(&device, &surface_config);
+
+    let mut imgui = ImguiContext::create();
+    imgui.set_ini_filename(None);
+    imgui.style_mut().use_dark_colors();
 
     let ui_font_filename = app_state.config().ui_font_filename.clone();
     let ui_font_size_pixels = if app_state.config().ui_font_size_pixels > 0.0 {
@@ -132,16 +124,13 @@ fn main() -> anyhow::Result<()> {
         14.0
     };
 
-    restore_last_directory_if_needed(&mut app_state);
+    let mut platform = WinitPlatform::init(&mut imgui);
+    platform.attach_window(imgui.io_mut(), window.as_ref(), HiDpiMode::Default);
 
-    let mut imgui = ImguiContext::create();
-    imgui.set_ini_filename(None);
-    imgui.style_mut().use_dark_colors();
-
-    // Apply inverse scaling to font_global_scale so layout size remains consistent
-    // while using a high-resolution font texture.
-    if dpi_scale != 1.0 {
-        imgui.io_mut().font_global_scale = 1.0 / dpi_scale;
+    let hidpi_factor = window.scale_factor() as f32;
+    if hidpi_factor > 0.0 && (hidpi_factor - 1.0).abs() > f32::EPSILON {
+        imgui.io_mut().font_global_scale = 1.0 / hidpi_factor;
+        log::info!("Detected DPI scale: {:.2}", hidpi_factor);
     }
 
     // Load custom font (from config, under assets/fonts/)
@@ -160,7 +149,7 @@ fn main() -> anyhow::Result<()> {
         imgui.fonts().add_font(&[
             FontSource::TtfData {
                 data: font_data,
-                size_pixels: ui_font_size_pixels * dpi_scale,
+                size_pixels: ui_font_size_pixels * hidpi_factor.max(1.0),
                 config: Some(FontConfig {
                     glyph_ranges: FontGlyphRanges::from_slice(&[
                         // Basic Latin + Latin Supplement
@@ -183,8 +172,8 @@ fn main() -> anyhow::Result<()> {
         log::info!(
             "Custom font loaded: {} ({} px, scale: {:.2})",
             font_path.display(),
-            ui_font_size_pixels * dpi_scale,
-            dpi_scale
+            ui_font_size_pixels * hidpi_factor.max(1.0),
+            hidpi_factor
         );
     } else {
         log::warn!(
@@ -193,101 +182,239 @@ fn main() -> anyhow::Result<()> {
         );
     }
 
-    let mut imgui_sdl2 = imgui_sdl2::ImguiSdl2::new(&mut imgui, &window);
-    let renderer =
-        imgui_opengl_renderer::Renderer::new(&mut imgui, |s| video.gl_get_proc_address(s) as _);
+    let renderer_config = RendererConfig {
+        texture_format: surface_config.format,
+        ..RendererConfig::default()
+    };
+    let mut renderer = imgui_wgpu::Renderer::new(&mut imgui, &device, &queue, renderer_config);
 
-    let mut event_pump = sdl.event_pump().map_err(anyhow::Error::msg)?;
+    let mut texture_manager = TextureManager::new(device.limits().max_texture_dimension_2d);
+    let mut current_texture: Option<UploadedTexture> = None;
+
     let mut last_frame = Instant::now();
-    let mut running = true;
+    let mut modifiers = ModifiersState::default();
 
-    while running {
-        for event in event_pump.poll_iter() {
-            imgui_sdl2.handle_event(&mut imgui, &event);
+    let _instance = instance;
+    event_loop
+        .run(move |event, window_target| {
+            platform.handle_event(imgui.io_mut(), window.as_ref(), &event);
 
             match event {
-                Event::Quit { .. } => running = false,
-                Event::KeyDown {
-                    keycode: Some(Keycode::Escape),
-                    ..
-                } => running = false,
-                Event::DropFile { filename, .. } => {
-                    app_state.handle_drop_path(PathBuf::from(filename).as_path());
+                Event::NewEvents(_) => {
+                    let now = Instant::now();
+                    imgui.io_mut().update_delta_time(now - last_frame);
+                    last_frame = now;
                 }
-                Event::DropText { filename, .. } => {
-                    let path = PathBuf::from(filename);
-                    if path.exists() {
-                        app_state.handle_drop_path(path.as_path());
+                Event::AboutToWait => {
+                    if app_state.take_reload_request() {
+                        current_texture = refresh_current_texture(
+                            &mut app_state,
+                            &device,
+                            &queue,
+                            &mut renderer,
+                            &mut texture_manager,
+                        );
+                    }
+
+                    if let Err(err) = platform.prepare_frame(imgui.io_mut(), window.as_ref()) {
+                        log::error!("prepare_frame failed: {err}");
+                        return;
+                    }
+                    window.request_redraw();
+                }
+                Event::WindowEvent {
+                    event: WindowEvent::RedrawRequested,
+                    window_id,
+                } if window_id == window.id() => {
+                    let frame = match surface.get_current_texture() {
+                        Ok(frame) => frame,
+                        Err(SurfaceError::Lost) | Err(SurfaceError::Outdated) => {
+                            surface.configure(&device, &surface_config);
+                            return;
+                        }
+                        Err(SurfaceError::OutOfMemory) => {
+                            log::error!("Surface out of memory; exiting");
+                            save_config_on_exit(&app_state);
+                            texture_manager.clear(&mut renderer);
+                            window_target.exit();
+                            return;
+                        }
+                        Err(SurfaceError::Timeout) => {
+                            return;
+                        }
+                        Err(SurfaceError::Other) => {
+                            log::warn!("Surface returned an unspecified error; retrying next frame");
+                            return;
+                        }
+                    };
+
+                    let view = frame
+                        .texture
+                        .create_view(&wgpu::TextureViewDescriptor::default());
+
+                    let ui = imgui.frame();
+                    let mut running = true;
+                    render_ui(ui, &mut app_state, current_texture, &mut running);
+
+                    if !running {
+                        save_config_on_exit(&app_state);
+                        texture_manager.clear(&mut renderer);
+                        window_target.exit();
+                        return;
+                    }
+
+                    platform.prepare_render(ui, window.as_ref());
+                    let draw_data = imgui.render();
+
+                    let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                        label: Some("image-viewer encoder"),
+                    });
+
+                    {
+                        let mut rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                            label: Some("image-viewer render pass"),
+                            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                                view: &view,
+                                resolve_target: None,
+                                ops: wgpu::Operations {
+                                    load: wgpu::LoadOp::Clear(wgpu::Color {
+                                        r: 0.08,
+                                        g: 0.09,
+                                        b: 0.11,
+                                        a: 1.0,
+                                    }),
+                                    store: wgpu::StoreOp::Store,
+                                },
+                            })],
+                            depth_stencil_attachment: None,
+                            occlusion_query_set: None,
+                            timestamp_writes: None,
+                        });
+
+                        if let Err(err) = renderer.render(draw_data, &queue, &device, &mut rpass) {
+                            log::error!("imgui render failed: {err}");
+                        }
+                    }
+
+                    queue.submit(Some(encoder.finish()));
+                    frame.present();
+                }
+                Event::WindowEvent { window_id, event } if window_id == window.id() => {
+                    match event {
+                        WindowEvent::CloseRequested => {
+                            save_config_on_exit(&app_state);
+                            texture_manager.clear(&mut renderer);
+                            window_target.exit();
+                        }
+                        WindowEvent::DroppedFile(path) => {
+                            app_state.handle_drop_path(path.as_path());
+                        }
+                        WindowEvent::ModifiersChanged(new_modifiers) => {
+                            modifiers = new_modifiers.state();
+                        }
+                        WindowEvent::KeyboardInput { event, .. }
+                            if event.state == ElementState::Pressed && !event.repeat =>
+                        {
+                            match event.physical_key {
+                                PhysicalKey::Code(KeyCode::Escape) => {
+                                    save_config_on_exit(&app_state);
+                                    texture_manager.clear(&mut renderer);
+                                    window_target.exit();
+                                }
+                                PhysicalKey::Code(KeyCode::KeyO)
+                                    if modifiers.control_key() || modifiers.super_key() =>
+                                {
+                                    app_state.open_directory_dialog();
+                                }
+                                PhysicalKey::Code(KeyCode::ArrowRight)
+                                | PhysicalKey::Code(KeyCode::ArrowDown)
+                                | PhysicalKey::Code(KeyCode::PageDown) => {
+                                    app_state.advance_selection(1);
+                                }
+                                PhysicalKey::Code(KeyCode::ArrowLeft)
+                                | PhysicalKey::Code(KeyCode::ArrowUp)
+                                | PhysicalKey::Code(KeyCode::PageUp) => {
+                                    app_state.advance_selection(-1);
+                                }
+                                _ => {}
+                            }
+                        }
+                        WindowEvent::Resized(new_size) => {
+                            if new_size.width > 0 && new_size.height > 0 {
+                                surface_config.width = new_size.width;
+                                surface_config.height = new_size.height;
+                                surface.configure(&device, &surface_config);
+                            }
+                        }
+                        WindowEvent::ScaleFactorChanged { scale_factor, .. } => {
+                            if scale_factor > 0.0 {
+                                imgui.io_mut().font_global_scale = 1.0 / scale_factor as f32;
+                            }
+                            let new_size = window.inner_size();
+                            if new_size.width > 0 && new_size.height > 0 {
+                                surface_config.width = new_size.width;
+                                surface_config.height = new_size.height;
+                                surface.configure(&device, &surface_config);
+                            }
+                        }
+                        _ => {}
                     }
                 }
-                Event::KeyDown {
-                    keycode: Some(Keycode::O),
-                    keymod,
-                    ..
-                } if keymod.intersects(Mod::LCTRLMOD | Mod::RCTRLMOD | Mod::LGUIMOD | Mod::RGUIMOD) =>
-                {
-                    app_state.open_directory_dialog();
-                }
-                Event::KeyDown {
-                    keycode: Some(Keycode::Right),
-                    ..
-                }
-                | Event::KeyDown {
-                    keycode: Some(Keycode::Down),
-                    ..
-                }
-                | Event::KeyDown {
-                    keycode: Some(Keycode::PageDown),
-                    ..
-                } => app_state.advance_selection(1),
-                Event::KeyDown {
-                    keycode: Some(Keycode::Left),
-                    ..
-                }
-                | Event::KeyDown {
-                    keycode: Some(Keycode::Up),
-                    ..
-                }
-                | Event::KeyDown {
-                    keycode: Some(Keycode::PageUp),
-                    ..
-                } => app_state.advance_selection(-1),
                 _ => {}
             }
-        }
+        })
+        .map_err(anyhow::Error::msg)
+}
 
-        let now = Instant::now();
-        let min_frame_time = Duration::from_secs_f32(1.0 / DEFAULT_RENDER_FPS as f32);
-        let delta_time = now - last_frame;
-        if delta_time < min_frame_time {
-            continue;
-        }
-        imgui.io_mut().update_delta_time(delta_time);
-        last_frame = now;
+fn create_surface_config(
+    surface: &Surface<'_>,
+    adapter: &wgpu::Adapter,
+    size: winit::dpi::PhysicalSize<u32>,
+) -> anyhow::Result<SurfaceConfiguration> {
+    let capabilities = surface.get_capabilities(adapter);
+    let format = capabilities
+        .formats
+        .iter()
+        .copied()
+        .find(|f| f.is_srgb())
+        .or_else(|| capabilities.formats.first().copied())
+        .context("surface supports no texture formats")?;
 
-        imgui_sdl2.prepare_frame(imgui.io_mut(), &window, &event_pump.mouse_state());
+    let present_mode = if capabilities
+        .present_modes
+        .contains(&wgpu::PresentMode::Fifo)
+    {
+        wgpu::PresentMode::Fifo
+    } else {
+        *capabilities
+            .present_modes
+            .first()
+            .context("surface supports no present modes")?
+    };
 
-        if app_state.take_reload_request() {
-            current_texture = refresh_current_texture(&mut app_state, &mut texture_manager);
-        }
+    let alpha_mode = capabilities
+        .alpha_modes
+        .iter()
+        .copied()
+        .find(|mode| *mode == CompositeAlphaMode::Auto)
+        .unwrap_or_else(|| capabilities.alpha_modes[0]);
 
-        let ui = imgui.frame();
-        render_ui(ui, &mut app_state, current_texture, &mut running);
+    Ok(SurfaceConfiguration {
+        usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+        format,
+        width: size.width.max(1),
+        height: size.height.max(1),
+        desired_maximum_frame_latency: 2,
+        present_mode,
+        alpha_mode,
+        view_formats: vec![],
+    })
+}
 
-        imgui_sdl2.prepare_render(ui, &window);
-        unsafe {
-            gl::Viewport(0, 0, window.drawable_size().0 as i32, window.drawable_size().1 as i32);
-            gl::ClearColor(0.08, 0.09, 0.11, 1.0);
-            gl::Clear(gl::COLOR_BUFFER_BIT);
-        }
-        renderer.render(&mut imgui);
-        window.gl_swap_window();
+fn save_config_on_exit(app_state: &ViewerState) {
+    if let Err(err) = infra::config::save(app_state.config_path(), app_state.config()) {
+        log::error!("failed to persist application configuration: {err:#}");
     }
-
-    infra::config::save(app_state.config_path(), app_state.config())
-        .context("failed to persist application configuration")?;
-
-    Ok(())
 }
 
 fn render_ui(
@@ -296,7 +423,7 @@ fn render_ui(
     current_texture: Option<UploadedTexture>,
     running: &mut bool,
 ) {
-    ui.main_menu_bar(|| {
+   ui.main_menu_bar(|| {
         ui.menu("File", || {
             if ui.menu_item("Open Directory...") {
                 app_state.open_directory_dialog();
@@ -517,9 +644,12 @@ fn restore_last_directory_if_needed(app_state: &mut ViewerState) {
     }
 }
 
-/// Decode selected image and make sure we have a usable OpenGL texture.
+/// Decode selected image and make sure we have a usable GPU texture.
 fn refresh_current_texture(
     app_state: &mut ViewerState,
+    device: &Device,
+    queue: &Queue,
+    renderer: &mut imgui_wgpu::Renderer,
     texture_manager: &mut TextureManager,
 ) -> Option<UploadedTexture> {
     let decoded = match app_state.load_current_image_rgba() {
@@ -529,7 +659,7 @@ fn refresh_current_texture(
     };
 
     let entry = app_state.current_entry()?;
-    match texture_manager.get_or_upload(&entry.path, &decoded) {
+    match texture_manager.get_or_upload(&entry.path, &decoded, device, queue, renderer) {
         Ok(uploaded) => Some(uploaded),
         Err(err) => {
             log::error!(

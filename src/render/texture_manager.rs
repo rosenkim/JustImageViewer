@@ -5,6 +5,8 @@ use std::{
 
 use anyhow::{Result, bail};
 use imgui::TextureId;
+use imgui_wgpu::{Renderer, Texture, TextureConfig};
+use wgpu::{Device, Extent3d, Queue, TextureFormat};
 
 use crate::core::image_loader::DecodedImage;
 
@@ -18,7 +20,7 @@ pub struct UploadedTexture {
 const DEFAULT_MAX_CACHE_SIZE: usize = 20;
 
 struct TextureRecord {
-    gl_id: u32,
+    texture_id: TextureId,
     width: usize,
     height: usize,
     last_used: u32,
@@ -26,14 +28,14 @@ struct TextureRecord {
 
 pub struct TextureManager {
     textures: HashMap<PathBuf, TextureRecord>,
-    max_texture_size: i32,
+    max_texture_size: u32,
     max_cache_size: usize,
     access_counter: u32,
 }
 
 impl TextureManager {
-    /// Create an empty texture cache with the given OpenGL max texture size limit.
-    pub fn new(max_texture_size: i32) -> Self {
+    /// Create an empty texture cache with the given GPU max texture size limit.
+    pub fn new(max_texture_size: u32) -> Self {
         Self {
             textures: HashMap::new(),
             max_texture_size,
@@ -42,13 +44,20 @@ impl TextureManager {
         }
     }
 
-    /// Return existing texture for a path, or upload a new OpenGL texture.
-    pub fn get_or_upload(&mut self, path: &Path, decoded: &DecodedImage) -> Result<UploadedTexture> {
+    /// Return existing texture for a path, or upload a new GPU texture.
+    pub fn get_or_upload(
+        &mut self,
+        path: &Path,
+        decoded: &DecodedImage,
+        device: &Device,
+        queue: &Queue,
+        renderer: &mut Renderer,
+    ) -> Result<UploadedTexture> {
         if let Some(existing) = self.textures.get_mut(path) {
             self.access_counter += 1;
             existing.last_used = self.access_counter;
             return Ok(UploadedTexture {
-                id: TextureId::new(existing.gl_id as usize),
+                id: existing.texture_id,
                 width: existing.width,
                 height: existing.height,
             });
@@ -58,47 +67,42 @@ impl TextureManager {
             bail!("cannot upload empty image buffer");
         }
 
-        if decoded.width as i32 > self.max_texture_size || decoded.height as i32 > self.max_texture_size {
+        if decoded.width as u32 > self.max_texture_size || decoded.height as u32 > self.max_texture_size {
             bail!(
-                "image size {}x{} exceeds OpenGL max texture size {}",
+                "image size {}x{} exceeds GPU max texture size {}",
                 decoded.width,
                 decoded.height,
                 self.max_texture_size
             );
         }
 
-        let mut gl_id: u32 = 0;
-        unsafe {
-            gl::GenTextures(1, &mut gl_id);
-            if gl_id == 0 {
-                bail!("failed to allocate OpenGL texture");
-            }
+        let texture = Texture::new(
+            device,
+            renderer,
+            TextureConfig {
+                size: Extent3d {
+                    width: decoded.width as u32,
+                    height: decoded.height as u32,
+                    depth_or_array_layers: 1,
+                },
+                label: Some("image-viewer texture"),
+                format: Some(TextureFormat::Rgba8UnormSrgb),
+                ..TextureConfig::default()
+            },
+        );
+        texture.write(
+            queue,
+            &decoded.pixels,
+            decoded.width as u32,
+            decoded.height as u32,
+        );
+        let texture_id = renderer.textures.insert(texture);
 
-            gl::BindTexture(gl::TEXTURE_2D, gl_id);
-            gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MIN_FILTER, gl::LINEAR as i32);
-            gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MAG_FILTER, gl::LINEAR as i32);
-            gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_WRAP_S, gl::CLAMP_TO_EDGE as i32);
-            gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_WRAP_T, gl::CLAMP_TO_EDGE as i32);
-            gl::PixelStorei(gl::UNPACK_ALIGNMENT, 1);
-            gl::TexImage2D(
-                gl::TEXTURE_2D,
-                0,
-                gl::RGBA8 as i32,
-                decoded.width as i32,
-                decoded.height as i32,
-                0,
-                gl::RGBA,
-                gl::UNSIGNED_BYTE,
-                decoded.pixels.as_ptr().cast(),
-            );
-            gl::BindTexture(gl::TEXTURE_2D, 0);
-        }
-
-        self.evict_if_full();
+        self.evict_if_full(renderer);
 
         self.access_counter += 1;
         let record = TextureRecord {
-            gl_id,
+            texture_id,
             width: decoded.width,
             height: decoded.height,
             last_used: self.access_counter,
@@ -107,14 +111,14 @@ impl TextureManager {
         self.textures.insert(path.to_path_buf(), record);
 
         Ok(UploadedTexture {
-            id: TextureId::new(gl_id as usize),
+            id: texture_id,
             width: decoded.width,
             height: decoded.height,
         })
     }
 
     /// Evict the least-recently-used entry if the cache is at capacity.
-    fn evict_if_full(&mut self) {
+    fn evict_if_full(&mut self, renderer: &mut Renderer) {
         if self.textures.len() < self.max_cache_size {
             return;
         }
@@ -128,25 +132,15 @@ impl TextureManager {
         if let Some(key) = oldest_key {
             if let Some(record) = self.textures.remove(&key) {
                 log::debug!("Evicting cached texture: {}", key.display());
-                unsafe {
-                    gl::DeleteTextures(1, &record.gl_id);
-                }
+                renderer.textures.remove(record.texture_id);
             }
         }
     }
 
-    /// Free all OpenGL textures owned by this manager.
-    pub fn clear(&mut self) {
+    /// Free all GPU textures owned by this manager.
+    pub fn clear(&mut self, renderer: &mut Renderer) {
         for record in self.textures.drain().map(|(_, record)| record) {
-            unsafe {
-                gl::DeleteTextures(1, &record.gl_id);
-            }
+            renderer.textures.remove(record.texture_id);
         }
-    }
-}
-
-impl Drop for TextureManager {
-    fn drop(&mut self) {
-        self.clear();
     }
 }
