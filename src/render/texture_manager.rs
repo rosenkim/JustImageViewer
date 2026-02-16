@@ -17,8 +17,6 @@ pub struct UploadedTexture {
     pub height: usize,
 }
 
-const DEFAULT_MAX_CACHE_SIZE: usize = 20;
-
 struct TextureRecord {
     texture_id: TextureId,
     width: usize,
@@ -35,11 +33,11 @@ pub struct TextureManager {
 
 impl TextureManager {
     /// Create an empty texture cache with the given GPU max texture size limit.
-    pub fn new(max_texture_size: u32) -> Self {
+    pub fn new(max_texture_size: u32, max_cache_size: usize) -> Self {
         Self {
             textures: HashMap::new(),
             max_texture_size,
-            max_cache_size: DEFAULT_MAX_CACHE_SIZE,
+            max_cache_size,
             access_counter: 0,
         }
     }
