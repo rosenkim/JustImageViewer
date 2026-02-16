@@ -45,3 +45,5 @@ Cargo.lock
 
 ...assistant
 NUL.*
+
+*.bak
