@@ -2,6 +2,8 @@ use crate::app::{ImageViewMode, LibrarySortField, SortDirection, ViewerState, fo
 use crate::render::texture_manager::UploadedTexture;
 use imgui::{Condition, MouseCursor, StyleVar};
 
+use super::keyboard_shortcuts_window::render_keyboard_shortcuts_window;
+
 const SPLITTER_WIDTH: f32 = 6.0;
 const MIN_LIBRARY_WIDTH: f32 = 220.0;
 const MIN_VIEWER_WIDTH: f32 = 280.0;
@@ -68,7 +70,7 @@ pub fn render_ui(
         });
         ui.menu("Help", || {
             if ui.menu_item("Keyboard Shortcuts") {
-                log::info!("Keyboard shortcuts overlay not implemented yet");
+                app_state.set_show_keyboard_shortcuts(true);
             }
         });
     });
@@ -289,6 +291,12 @@ pub fn render_ui(
                 }
             ));
         });
+
+    if app_state.show_keyboard_shortcuts() {
+        let mut open = true;
+        render_keyboard_shortcuts_window(ui, &mut open);
+        app_state.set_show_keyboard_shortcuts(open);
+    }
 
     if let Some(index) = clicked_index {
         app_state.select_index(index);

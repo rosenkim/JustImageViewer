@@ -40,6 +40,7 @@ pub struct ViewerState {
     status_message: String,
     show_library: bool,
     show_info: bool,
+    show_keyboard_shortcuts: bool,
     current_directory: Option<PathBuf>,
     media_items: Vec<MediaEntry>,
     current_index: Option<usize>,
@@ -61,6 +62,7 @@ impl ViewerState {
             status_message,
             show_library: true,
             show_info: true,
+            show_keyboard_shortcuts: false,
             current_directory: None,
             media_items: Vec::new(),
             current_index: None,
@@ -91,6 +93,14 @@ impl ViewerState {
 
     pub fn set_show_info(&mut self, show: bool) {
         self.show_info = show;
+    }
+
+    pub fn show_keyboard_shortcuts(&self) -> bool {
+        self.show_keyboard_shortcuts
+    }
+
+    pub fn set_show_keyboard_shortcuts(&mut self, show: bool) {
+        self.show_keyboard_shortcuts = show;
     }
 
     pub fn config_path(&self) -> &Path {
