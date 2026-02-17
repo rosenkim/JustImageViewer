@@ -13,12 +13,12 @@ use imgui_wgpu::RendererConfig;
 use imgui_winit_support::{HiDpiMode, WinitPlatform};
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 use wgpu::{CompositeAlphaMode, Device, Queue, Surface, SurfaceConfiguration, SurfaceError};
 use winit::{
     dpi::LogicalSize,
     event::{ElementState, Event, WindowEvent},
-    event_loop::EventLoop,
+    event_loop::{ControlFlow, EventLoop},
     keyboard::{KeyCode, ModifiersState, PhysicalKey},
     window::WindowBuilder,
 };
@@ -26,10 +26,18 @@ use winit::{
 use crate::render::texture_manager::{TextureManager, UploadedTexture};
 use crate::ui::render_ui;
 
+const FOCUSED_FPS: u32 = 60;
+const UNFOCUSED_FPS: u32 = 5;
+
 #[derive(Debug, Default)]
 struct AppArgs {
     reset_config: bool,
     open_path: Option<PathBuf>,
+}
+
+fn frame_interval_from_fps(fps: u32) -> Duration {
+    debug_assert!(fps > 0);
+    Duration::from_secs_f64(1.0 / f64::from(fps))
 }
 
 fn parse_args() -> anyhow::Result<AppArgs> {
@@ -218,6 +226,10 @@ fn main() -> anyhow::Result<()> {
 
     let mut last_frame = Instant::now();
     let mut modifiers = ModifiersState::default();
+    let mut is_window_focused = true;
+    let focused_frame_interval = frame_interval_from_fps(FOCUSED_FPS);
+    let unfocused_frame_interval = frame_interval_from_fps(UNFOCUSED_FPS);
+    let mut next_redraw_at = Instant::now();
 
     let _instance = instance;
     event_loop
@@ -231,6 +243,19 @@ fn main() -> anyhow::Result<()> {
                     last_frame = now;
                 }
                 Event::AboutToWait => {
+                    let now = Instant::now();
+                    if now < next_redraw_at {
+                        window_target.set_control_flow(ControlFlow::WaitUntil(next_redraw_at));
+                        return;
+                    }
+                    let frame_interval = if is_window_focused {
+                        focused_frame_interval
+                    } else {
+                        unfocused_frame_interval
+                    };
+                    next_redraw_at = now + frame_interval;
+                    window_target.set_control_flow(ControlFlow::WaitUntil(next_redraw_at));
+
                     if app_state.take_reload_request() {
                         current_texture = refresh_current_texture(
                             &mut app_state,
@@ -383,6 +408,13 @@ fn main() -> anyhow::Result<()> {
                                 surface_config.width = new_size.width;
                                 surface_config.height = new_size.height;
                                 surface.configure(&device, &surface_config);
+                            }
+                        }
+                        WindowEvent::Focused(focused) => {
+                            is_window_focused = focused;
+                            next_redraw_at = Instant::now();
+                            if focused {
+                                window.request_redraw();
                             }
                         }
                         _ => {}
