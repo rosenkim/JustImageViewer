@@ -29,6 +29,7 @@ use crate::ui::render_ui;
 #[derive(Debug, Default)]
 struct AppArgs {
     reset_config: bool,
+    open_path: Option<PathBuf>,
 }
 
 fn parse_args() -> anyhow::Result<AppArgs> {
@@ -37,12 +38,21 @@ fn parse_args() -> anyhow::Result<AppArgs> {
         match arg.as_str() {
             "--reset-config" => args.reset_config = true,
             "-h" | "--help" => {
-                println!("Usage: image-viewer [--reset-config]");
+                println!("Usage: image-viewer [--reset-config] [PATH]");
                 println!("  --reset-config  overwrite saved settings with default_settings.toml");
+                println!("  PATH            image file path (single-file mode) or directory path");
                 std::process::exit(0);
             }
             _ => {
-                bail!("unknown argument: {arg}\nUsage: image-viewer [--reset-config]");
+                if arg.starts_with('-') {
+                    bail!("unknown argument: {arg}\nUsage: image-viewer [--reset-config] [PATH]");
+                }
+                if args.open_path.is_some() {
+                    bail!(
+                        "only one PATH argument is supported\nUsage: image-viewer [--reset-config] [PATH]"
+                    );
+                }
+                args.open_path = Some(PathBuf::from(arg));
             }
         }
     }
@@ -65,7 +75,13 @@ fn main() -> anyhow::Result<()> {
     log::info!("Loaded configuration from {}", config_handle.path.display());
 
     let mut app_state = ViewerState::new(config_handle.path, config_handle.settings);
-    restore_last_directory_if_needed(&mut app_state);
+    if let Some(open_path) = args.open_path.clone() {
+        app_state
+            .open_path_argument(open_path)
+            .context("failed to open PATH argument")?;
+    } else {
+        restore_last_directory_if_needed(&mut app_state);
+    }
 
     let event_loop = EventLoop::new().map_err(anyhow::Error::msg)?;
     let window = Arc::new(

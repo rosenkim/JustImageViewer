@@ -1,4 +1,10 @@
-use std::path::{Path, PathBuf};
+use std::{
+    ffi::OsStr,
+    path::{Path, PathBuf},
+    time::UNIX_EPOCH,
+};
+
+use anyhow::{Context, bail};
 
 use crate::{
     core::{
@@ -197,6 +203,24 @@ impl ViewerState {
         }
     }
 
+    pub fn open_path_argument(&mut self, path: PathBuf) -> anyhow::Result<()> {
+        if path.is_dir() {
+            self.load_directory(path, None);
+            return Ok(());
+        }
+
+        if path.is_file() {
+            self.load_single_file(path)?;
+            self.show_library = false;
+            return Ok(());
+        }
+
+        bail!(
+            "path does not exist or is not accessible: {}",
+            path.display()
+        );
+    }
+
     pub fn refresh_current_directory(&mut self) {
         let Some(directory) = self.current_directory.clone() else {
             self.status_message = "No directory is currently open".to_owned();
@@ -261,6 +285,50 @@ impl ViewerState {
         }
     }
 
+    fn load_single_file(&mut self, file_path: PathBuf) -> anyhow::Result<()> {
+        let directory = file_path
+            .parent()
+            .map(Path::to_path_buf)
+            .context("file path has no parent directory")?;
+
+        let extension = file_path
+            .extension()
+            .and_then(OsStr::to_str)
+            .context("file has no extension")?;
+        let format = media::MediaFormat::from_extension(extension)
+            .with_context(|| format!("unsupported image file extension: {}", extension))?;
+
+        let metadata = std::fs::metadata(&file_path)
+            .with_context(|| format!("failed to read metadata for {}", file_path.display()))?;
+        let file_size = metadata.len();
+        let modified_time = metadata
+            .modified()
+            .ok()
+            .and_then(|time| time.duration_since(UNIX_EPOCH).ok())
+            .unwrap_or_default();
+        let file_name = file_path
+            .file_name()
+            .and_then(OsStr::to_str)
+            .map(str::to_owned)
+            .unwrap_or_else(|| file_path.display().to_string());
+
+        self.config.last_open_directory = Some(directory.clone());
+        self.current_directory = Some(directory);
+        self.media_items = vec![MediaEntry {
+            path: file_path.clone(),
+            file_name,
+            format,
+            file_size,
+            modified_time,
+        }];
+        self.current_index = Some(0);
+        self.current_image_size = None;
+        self.needs_image_reload = true;
+        self.status_message = format!("Loaded 1 image: {}", file_path.display());
+
+        Ok(())
+    }
+
     pub fn take_reload_request(&mut self) -> bool {
         let requested = self.needs_image_reload;
         self.needs_image_reload = false;
@@ -280,11 +348,8 @@ impl ViewerState {
         match image_loader::load_image_rgba(&path) {
             Ok(decoded) => {
                 self.current_image_size = Some((decoded.width, decoded.height));
-                self.status_message = format!(
-                    "Viewing {} ({})",
-                    file_name,
-                    format_file_size(file_size)
-                );
+                self.status_message =
+                    format!("Viewing {} ({})", file_name, format_file_size(file_size));
                 Ok(Some(decoded))
             }
             Err(err) => {
