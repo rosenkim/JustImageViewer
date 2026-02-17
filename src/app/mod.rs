@@ -15,6 +15,19 @@ pub enum ImageViewMode {
     FitToWidth,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LibrarySortField {
+    Name,
+    Date,
+    Size,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SortDirection {
+    Ascending,
+    Descending,
+}
+
 pub struct ViewerState {
     config: AppConfig,
     config_path: PathBuf,
@@ -28,6 +41,8 @@ pub struct ViewerState {
     needs_image_reload: bool,
     library_width: f32,
     image_view_mode: ImageViewMode,
+    library_sort_field: LibrarySortField,
+    sort_direction: SortDirection,
 }
 
 impl ViewerState {
@@ -47,6 +62,8 @@ impl ViewerState {
             needs_image_reload: false,
             library_width: 300.0,
             image_view_mode: ImageViewMode::FitToWindow,
+            library_sort_field: LibrarySortField::Name,
+            sort_direction: SortDirection::Ascending,
         }
     }
 
@@ -125,6 +142,30 @@ impl ViewerState {
         self.image_view_mode = mode;
     }
 
+    pub fn library_sort_field(&self) -> LibrarySortField {
+        self.library_sort_field
+    }
+
+    pub fn set_library_sort_field(&mut self, field: LibrarySortField) {
+        if self.library_sort_field == field {
+            return;
+        }
+        self.library_sort_field = field;
+        self.sort_media_items();
+    }
+
+    pub fn sort_direction(&self) -> SortDirection {
+        self.sort_direction
+    }
+
+    pub fn set_sort_direction(&mut self, direction: SortDirection) {
+        if self.sort_direction == direction {
+            return;
+        }
+        self.sort_direction = direction;
+        self.sort_media_items();
+    }
+
     pub fn select_index(&mut self, index: usize) {
         if index < self.media_items.len() {
             self.current_index = Some(index);
@@ -169,7 +210,9 @@ impl ViewerState {
     pub fn handle_drop_path(&mut self, path: &Path) {
         if path.is_dir() {
             self.load_directory(path.to_path_buf(), None);
-        } else if path.is_file() && let Some(parent) = path.parent() {
+        } else if path.is_file()
+            && let Some(parent) = path.parent()
+        {
             self.load_directory(parent.to_path_buf(), Some(path.to_path_buf()));
         }
     }
@@ -194,14 +237,18 @@ impl ViewerState {
                     return;
                 }
 
-                let focus_index = focus_file
-                    .as_ref()
-                    .and_then(|target| entries.iter().position(|entry| entry.path == *target))
-                    .or(Some(0));
-
                 self.config.last_open_directory = Some(directory.clone());
                 self.current_directory = Some(directory);
                 self.media_items = entries;
+                self.sort_media_items();
+                let focus_index = focus_file
+                    .as_ref()
+                    .and_then(|target| {
+                        self.media_items
+                            .iter()
+                            .position(|entry| entry.path == *target)
+                    })
+                    .or(Some(0));
                 self.current_index = focus_index;
                 self.current_image_size = None;
                 self.status_message = format!("Loaded {} images from {}", total, directory_display);
@@ -247,6 +294,39 @@ impl ViewerState {
                 Err(err)
             }
         }
+    }
+
+    fn sort_media_items(&mut self) {
+        let selected_path = self.current_entry().map(|entry| entry.path.clone());
+        let sort_direction = self.sort_direction;
+        let sort_field = self.library_sort_field;
+
+        self.media_items.sort_by(|a, b| {
+            let primary = match sort_field {
+                LibrarySortField::Name => {
+                    a.file_name.to_lowercase().cmp(&b.file_name.to_lowercase())
+                }
+                LibrarySortField::Date => a.modified_time.cmp(&b.modified_time),
+                LibrarySortField::Size => a.file_size.cmp(&b.file_size),
+            };
+            let name_tiebreaker = a.file_name.to_lowercase().cmp(&b.file_name.to_lowercase());
+            let path_tiebreaker = a.path.cmp(&b.path);
+
+            if sort_direction == SortDirection::Ascending {
+                primary.then(name_tiebreaker).then(path_tiebreaker)
+            } else {
+                primary
+                    .reverse()
+                    .then(name_tiebreaker.reverse())
+                    .then(path_tiebreaker.reverse())
+            }
+        });
+
+        self.current_index = selected_path.as_ref().and_then(|target| {
+            self.media_items
+                .iter()
+                .position(|entry| &entry.path == target)
+        });
     }
 }
 

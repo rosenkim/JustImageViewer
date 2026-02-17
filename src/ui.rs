@@ -1,10 +1,12 @@
-use crate::app::{ImageViewMode, ViewerState, format_file_size};
+use crate::app::{ImageViewMode, LibrarySortField, SortDirection, ViewerState, format_file_size};
 use crate::render::texture_manager::UploadedTexture;
 use imgui::{Condition, MouseCursor, StyleVar};
 
 const SPLITTER_WIDTH: f32 = 6.0;
 const MIN_LIBRARY_WIDTH: f32 = 220.0;
 const MIN_VIEWER_WIDTH: f32 = 280.0;
+const LIBRARY_SORT_FIELDS: [&str; 3] = ["Name", "Date", "Size"];
+const LIBRARY_SORT_DIRECTIONS: [&str; 2] = ["Ascending", "Descending"];
 
 pub fn render_ui(
     ui: &imgui::Ui,
@@ -12,7 +14,7 @@ pub fn render_ui(
     current_texture: Option<UploadedTexture>,
     running: &mut bool,
 ) {
-   ui.main_menu_bar(|| {
+    ui.main_menu_bar(|| {
         ui.menu("File", || {
             if ui.menu_item("Open Directory...") {
                 app_state.open_directory_dialog();
@@ -24,7 +26,11 @@ pub fn render_ui(
         ui.menu("View", || {
             ui.menu("Layout", || {
                 let mut show_library = app_state.show_library();
-                if ui.menu_item_config("Library").selected(show_library).build() {
+                if ui
+                    .menu_item_config("Library")
+                    .selected(show_library)
+                    .build()
+                {
                     show_library = !show_library;
                     app_state.set_show_library(show_library);
                 }
@@ -120,18 +126,58 @@ pub fn render_ui(
                         } else {
                             ui.text("Drag a directory/file or use File > Open Directory");
                         }
+                        ui.text("Sort:");
+                        ui.same_line();
+                        let mut sort_field_index = match app_state.library_sort_field() {
+                            LibrarySortField::Name => 0,
+                            LibrarySortField::Date => 1,
+                            LibrarySortField::Size => 2,
+                        };
+                        ui.set_next_item_width(88.0);
+                        if ui.combo_simple_string(
+                            "##library_sort_field",
+                            &mut sort_field_index,
+                            &LIBRARY_SORT_FIELDS,
+                        ) {
+                            let field = match sort_field_index {
+                                1 => LibrarySortField::Date,
+                                2 => LibrarySortField::Size,
+                                _ => LibrarySortField::Name,
+                            };
+                            app_state.set_library_sort_field(field);
+                        }
+                        ui.same_line();
+                        let mut sort_direction_index = match app_state.sort_direction() {
+                            SortDirection::Ascending => 0,
+                            SortDirection::Descending => 1,
+                        };
+                        ui.set_next_item_width(96.0);
+                        if ui.combo_simple_string(
+                            "##library_sort_direction",
+                            &mut sort_direction_index,
+                            &LIBRARY_SORT_DIRECTIONS,
+                        ) {
+                            let direction = if sort_direction_index == 1 {
+                                SortDirection::Descending
+                            } else {
+                                SortDirection::Ascending
+                            };
+                            app_state.set_sort_direction(direction);
+                        }
                         ui.separator();
-                        ui.child_window("library_scroll").size([0.0, -36.0]).build(|| {
-                            for (index, entry) in app_state.media_items().iter().enumerate() {
-                                if ui
-                                    .selectable_config(&entry.file_name)
-                                    .selected(app_state.current_index() == Some(index))
-                                    .build()
-                                {
-                                    clicked_index = Some(index);
+                        ui.child_window("library_scroll")
+                            .size([0.0, -36.0])
+                            .build(|| {
+                                for (index, entry) in app_state.media_items().iter().enumerate() {
+                                    if ui
+                                        .selectable_config(&entry.file_name)
+                                        .selected(app_state.current_index() == Some(index))
+                                        .build()
+                                    {
+                                        clicked_index = Some(index);
+                                    }
                                 }
-                            }
-                        });
+                            });
                         if ui.button("Open Directory...") {
                             app_state.open_directory_dialog();
                         }
@@ -182,10 +228,8 @@ pub fn render_ui(
                                     ImageViewMode::FitToWidth => width_scale,
                                 }
                                 .max(0.01);
-                                let display_size = [
-                                    texture.width as f32 * scale,
-                                    texture.height as f32 * scale,
-                                ];
+                                let display_size =
+                                    [texture.width as f32 * scale, texture.height as f32 * scale];
                                 let cursor = ui.cursor_pos();
                                 let centered = [
                                     (avail[0] - display_size[0]).max(0.0) * 0.5,

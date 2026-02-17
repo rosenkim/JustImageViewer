@@ -7,7 +7,7 @@ mod render;
 mod ui;
 
 use anyhow::{Context, bail};
-use app::{ViewerState};
+use app::ViewerState;
 use imgui::{Context as ImguiContext, FontConfig, FontGlyphRanges, FontSource};
 use imgui_wgpu::RendererConfig;
 use imgui_winit_support::{HiDpiMode, WinitPlatform};
@@ -42,9 +42,7 @@ fn parse_args() -> anyhow::Result<AppArgs> {
                 std::process::exit(0);
             }
             _ => {
-                bail!(
-                    "unknown argument: {arg}\nUsage: image-viewer [--reset-config]"
-                );
+                bail!("unknown argument: {arg}\nUsage: image-viewer [--reset-config]");
             }
         }
     }
@@ -95,19 +93,17 @@ fn main() -> anyhow::Result<()> {
     // 혹은 성능 위주라면 어댑터의 값을 그대로 사용합니다.
     let adapter_limits = adapter.limits();
 
-    let (device, queue) = pollster::block_on(adapter.request_device(
-        &wgpu::DeviceDescriptor {
-            label: Some("image-viewer device"),
-            required_features: wgpu::Features::empty(),
-            // required_limits: wgpu::Limits::default(),
-            required_limits: wgpu::Limits {
-                max_texture_dimension_2d: adapter_limits.max_texture_dimension_2d,
-                ..wgpu::Limits::downlevel_defaults()
-            },
-            memory_hints: wgpu::MemoryHints::MemoryUsage,
-            trace: wgpu::Trace::Off,
+    let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
+        label: Some("image-viewer device"),
+        required_features: wgpu::Features::empty(),
+        // required_limits: wgpu::Limits::default(),
+        required_limits: wgpu::Limits {
+            max_texture_dimension_2d: adapter_limits.max_texture_dimension_2d,
+            ..wgpu::Limits::downlevel_defaults()
         },
-    ))
+        memory_hints: wgpu::MemoryHints::MemoryUsage,
+        trace: wgpu::Trace::Off,
+    }))
     .context("failed to request wgpu device")?;
 
     let mut surface_config = create_surface_config(&surface, &adapter, window.inner_size())
@@ -145,35 +141,27 @@ fn main() -> anyhow::Result<()> {
         .join(&ui_font_filename);
 
     if !ui_font_filename.is_empty() && font_path.exists() {
-        let font_data = std::fs::read(&font_path)
-            .expect("failed to read custom font file");
+        let font_data = std::fs::read(&font_path).expect("failed to read custom font file");
         // Leak the data so it lives for the entire program lifetime.
         // imgui requires the font data slice to live as long as the context.
         let font_data: &'static [u8] = Box::leak(font_data.into_boxed_slice());
 
-        imgui.fonts().add_font(&[
-            FontSource::TtfData {
-                data: font_data,
-                size_pixels: ui_font_size_pixels * hidpi_factor.max(1.0),
-                config: Some(FontConfig {
-                    glyph_ranges: FontGlyphRanges::from_slice(&[
-                        // Basic Latin + Latin Supplement
-                        0x0020, 0x00FF,
-                        // Korean (Hangul Syllables)
-                        0xAC00, 0xD7A3,
-                        // Korean (Hangul Jamo)
-                        0x1100, 0x11FF,
-                        // Korean (Hangul Compatibility Jamo)
-                        0x3130, 0x318F,
-                        // CJK Unified Ideographs (common Hanja)
-                        0x4E00, 0x9FFF,
-                        // Null terminator
-                        0,
-                    ]),
-                    ..FontConfig::default()
-                }),
-            },
-        ]);
+        imgui.fonts().add_font(&[FontSource::TtfData {
+            data: font_data,
+            size_pixels: ui_font_size_pixels * hidpi_factor.max(1.0),
+            config: Some(FontConfig {
+                glyph_ranges: FontGlyphRanges::from_slice(&[
+                    // Basic Latin + Latin Supplement
+                    0x0020, 0x00FF, // Korean (Hangul Syllables)
+                    0xAC00, 0xD7A3, // Korean (Hangul Jamo)
+                    0x1100, 0x11FF, // Korean (Hangul Compatibility Jamo)
+                    0x3130, 0x318F, // CJK Unified Ideographs (common Hanja)
+                    0x4E00, 0x9FFF, // Null terminator
+                    0,
+                ]),
+                ..FontConfig::default()
+            }),
+        }]);
         log::info!(
             "Custom font loaded: {} ({} px, scale: {:.2})",
             font_path.display(),
@@ -264,7 +252,9 @@ fn main() -> anyhow::Result<()> {
                             return;
                         }
                         Err(SurfaceError::Other) => {
-                            log::warn!("Surface returned an unspecified error; retrying next frame");
+                            log::warn!(
+                                "Surface returned an unspecified error; retrying next frame"
+                            );
                             return;
                         }
                     };
@@ -287,9 +277,10 @@ fn main() -> anyhow::Result<()> {
                     platform.prepare_render(ui, window.as_ref());
                     let draw_data = imgui.render();
 
-                    let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                        label: Some("image-viewer encoder"),
-                    });
+                    let mut encoder =
+                        device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                            label: Some("image-viewer encoder"),
+                        });
 
                     {
                         let mut rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {

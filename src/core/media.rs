@@ -2,6 +2,7 @@ use std::{
     ffi::OsStr,
     fs,
     path::{Path, PathBuf},
+    time::{Duration, UNIX_EPOCH},
 };
 
 use anyhow::{Context, Result};
@@ -65,6 +66,7 @@ pub struct MediaEntry {
     pub file_name: String,
     pub format: MediaFormat,
     pub file_size: u64,
+    pub modified_time: Duration,
 }
 
 pub fn scan_directory(root: &Path) -> Result<Vec<MediaEntry>> {
@@ -100,6 +102,11 @@ pub fn scan_directory(root: &Path) -> Result<Vec<MediaEntry>> {
             .with_context(|| format!("failed to read metadata for {}", path.display()))?;
 
         let file_size = metadata.len();
+        let modified_time = metadata
+            .modified()
+            .ok()
+            .and_then(|time| time.duration_since(UNIX_EPOCH).ok())
+            .unwrap_or_default();
 
         let file_name = path
             .file_name()
@@ -112,10 +119,9 @@ pub fn scan_directory(root: &Path) -> Result<Vec<MediaEntry>> {
             file_name,
             format,
             file_size,
+            modified_time,
         });
     }
-
-    entries.sort_by(|a, b| a.file_name.to_lowercase().cmp(&b.file_name.to_lowercase()));
 
     Ok(entries)
 }
