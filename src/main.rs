@@ -193,13 +193,21 @@ fn main() -> anyhow::Result<()> {
     };
     let mut renderer = imgui_wgpu::Renderer::new(&mut imgui, &device, &queue, renderer_config);
 
-    let default_max_cache_size: usize = 20;
+    let mut max_cache_size = app_state.config().texture_cache_max_entries;
+    if max_cache_size == 0 {
+        log::warn!(
+            "Invalid texture_cache_max_entries ({}). Falling back to 20",
+            max_cache_size
+        );
+        max_cache_size = 20;
+    }
+
     let max_texture_size = device.limits().max_texture_dimension_2d;
-    let mut texture_manager = TextureManager::new(max_texture_size, default_max_cache_size);
+    let mut texture_manager = TextureManager::new(max_texture_size, max_cache_size);
     log::info!(
-        "TextureManager created with max_texture_size: {}, default_max_cache_size: {}",
+        "TextureManager created with max_texture_size: {}, max_cache_size: {}",
         max_texture_size,
-        default_max_cache_size
+        max_cache_size
     );
 
     let mut current_texture: Option<UploadedTexture> = None;

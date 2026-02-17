@@ -9,6 +9,10 @@ ui_font_filename = "NanumGothic.ttf"
 # UI font size in pixels
 ui_font_size_pixels = 14.0
 
+[texture]
+# Maximum number of cached textures
+texture_cache_max_entries = 20
+
 [background_style]
 # mode can be "checker" or "solid"
 mode = "checker"
