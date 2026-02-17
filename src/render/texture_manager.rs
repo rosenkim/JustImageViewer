@@ -65,7 +65,9 @@ impl TextureManager {
             bail!("cannot upload empty image buffer");
         }
 
-        if decoded.width as u32 > self.max_texture_size || decoded.height as u32 > self.max_texture_size {
+        if decoded.width as u32 > self.max_texture_size
+            || decoded.height as u32 > self.max_texture_size
+        {
             bail!(
                 "image size {}x{} exceeds GPU max texture size {}",
                 decoded.width,
