@@ -14,6 +14,6 @@ pub fn render_keyboard_shortcuts_window(ui: &imgui::Ui, open: &mut bool) {
             ui.text("General");
             ui.separator();
             ui.bullet_text("Ctrl/Cmd + O: Open directory");
-            ui.bullet_text("Esc: Quit application");
+            ui.bullet_text("Esc: Cancel selection");
         });
 }

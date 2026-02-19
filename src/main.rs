@@ -370,9 +370,7 @@ fn main() -> anyhow::Result<()> {
                         {
                             match event.physical_key {
                                 PhysicalKey::Code(KeyCode::Escape) => {
-                                    save_config_on_exit(&app_state);
-                                    texture_manager.clear(&mut renderer);
-                                    window_target.exit();
+                                    app_state.clear_image_selection_state();
                                 }
                                 PhysicalKey::Code(KeyCode::KeyO)
                                     if modifiers.control_key() || modifiers.super_key() =>

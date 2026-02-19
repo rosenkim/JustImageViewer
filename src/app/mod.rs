@@ -34,6 +34,29 @@ pub enum SortDirection {
     Descending,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ImageSelectionRect {
+    pub min: [f32; 2],
+    pub max: [f32; 2],
+}
+
+impl ImageSelectionRect {
+    pub fn from_points(start: [f32; 2], end: [f32; 2]) -> Self {
+        Self {
+            min: [start[0].min(end[0]), start[1].min(end[1])],
+            max: [start[0].max(end[0]), start[1].max(end[1])],
+        }
+    }
+
+    pub fn width(&self) -> f32 {
+        self.max[0] - self.min[0]
+    }
+
+    pub fn height(&self) -> f32 {
+        self.max[1] - self.min[1]
+    }
+}
+
 pub struct ViewerState {
     config: AppConfig,
     config_path: PathBuf,
@@ -50,6 +73,8 @@ pub struct ViewerState {
     image_view_mode: ImageViewMode,
     library_sort_field: LibrarySortField,
     sort_direction: SortDirection,
+    image_selection: Option<ImageSelectionRect>,
+    image_selection_drag_start: Option<[f32; 2]>,
 }
 
 impl ViewerState {
@@ -72,6 +97,8 @@ impl ViewerState {
             image_view_mode: ImageViewMode::FitToWindow,
             library_sort_field: LibrarySortField::Name,
             sort_direction: SortDirection::Ascending,
+            image_selection: None,
+            image_selection_drag_start: None,
         }
     }
 
@@ -158,6 +185,31 @@ impl ViewerState {
         self.image_view_mode = mode;
     }
 
+    pub fn image_selection(&self) -> Option<ImageSelectionRect> {
+        self.image_selection
+    }
+
+    pub fn set_image_selection(&mut self, selection: Option<ImageSelectionRect>) {
+        self.image_selection = selection;
+    }
+
+    pub fn image_selection_drag_start(&self) -> Option<[f32; 2]> {
+        self.image_selection_drag_start
+    }
+
+    pub fn begin_image_selection_drag(&mut self, start: [f32; 2]) {
+        self.image_selection_drag_start = Some(start);
+    }
+
+    pub fn clear_image_selection_drag(&mut self) {
+        self.image_selection_drag_start = None;
+    }
+
+    pub fn clear_image_selection_state(&mut self) {
+        self.image_selection = None;
+        self.image_selection_drag_start = None;
+    }
+
     pub fn library_sort_field(&self) -> LibrarySortField {
         self.library_sort_field
     }
@@ -186,6 +238,7 @@ impl ViewerState {
         if index < self.media_items.len() {
             self.current_index = Some(index);
             self.needs_image_reload = true;
+            self.clear_image_selection_state();
         }
     }
 
@@ -202,6 +255,7 @@ impl ViewerState {
         if next != current {
             self.current_index = Some(next);
             self.needs_image_reload = true;
+            self.clear_image_selection_state();
         }
     }
 
@@ -268,6 +322,7 @@ impl ViewerState {
                     self.current_index = None;
                     self.current_image_size = None;
                     self.needs_image_reload = false;
+                    self.clear_image_selection_state();
                     return;
                 }
 
@@ -287,6 +342,7 @@ impl ViewerState {
                 self.current_image_size = None;
                 self.status_message = format!("Loaded {} images from {}", total, directory_display);
                 self.needs_image_reload = true;
+                self.clear_image_selection_state();
             }
             Err(err) => {
                 self.status_message = format!("Failed to read {}: {:#}", directory_display, err);
@@ -335,6 +391,7 @@ impl ViewerState {
         self.current_image_size = None;
         self.needs_image_reload = true;
         self.status_message = format!("Loaded 1 image: {}", file_path.display());
+        self.clear_image_selection_state();
 
         Ok(())
     }
@@ -349,6 +406,7 @@ impl ViewerState {
     pub fn load_current_image_rgba(&mut self) -> anyhow::Result<Option<DecodedImage>> {
         let Some(entry) = self.current_entry() else {
             self.current_image_size = None;
+            self.clear_image_selection_state();
             return Ok(None);
         };
         let path = entry.path.clone();
@@ -364,6 +422,7 @@ impl ViewerState {
             }
             Err(err) => {
                 self.current_image_size = None;
+                self.clear_image_selection_state();
                 self.status_message = format!("Failed to decode {}: {:#}", file_name, err);
                 log::error!("Image decode error for {}: {:#}", path.display(), err);
                 Err(err)

@@ -2,6 +2,7 @@ use crate::app::{ImageViewMode, LibrarySortField, SortDirection, ViewerState, fo
 use crate::render::texture_manager::UploadedTexture;
 use imgui::{Condition, MouseCursor, StyleVar};
 
+use super::helper::render_image_selection_widget;
 use super::keyboard_shortcuts_window::render_keyboard_shortcuts_window;
 
 const SPLITTER_WIDTH: f32 = 6.0;
@@ -221,6 +222,12 @@ pub fn render_ui(
                         .flags(imgui::WindowFlags::HORIZONTAL_SCROLLBAR)
                         .build(|| {
                             if let Some(texture) = current_texture {
+                                let view_panel_min = ui.cursor_screen_pos();
+                                let view_panel_size = ui.content_region_avail();
+                                let view_panel_max = [
+                                    view_panel_min[0] + view_panel_size[0],
+                                    view_panel_min[1] + view_panel_size[1],
+                                ];
                                 let avail = ui.content_region_avail();
                                 let width_scale = avail[0] / texture.width as f32;
                                 let height_scale = avail[1] / texture.height as f32;
@@ -242,6 +249,15 @@ pub fn render_ui(
                                     cursor[1] + centered[1],
                                 ]);
                                 imgui::Image::new(texture.id, display_size).build(ui);
+                                render_image_selection_widget(
+                                    ui,
+                                    app_state,
+                                    view_panel_min,
+                                    view_panel_max,
+                                    ui.item_rect_min(),
+                                    display_size,
+                                    [texture.width as f32, texture.height as f32],
+                                );
                             } else if app_state.current_directory().is_some() {
                                 ui.text("No image selected or decode failed.");
                             } else {
