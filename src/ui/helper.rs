@@ -45,8 +45,6 @@ pub fn render_image_selection_widget(
     if let Some(saved_selection) = app_state.image_selection() {
         draw_dashed_selection(
             ui,
-            view_panel_min,
-            view_panel_max,
             image_display_size,
             image_pixel_size,
             image_screen_min,
@@ -67,8 +65,6 @@ pub fn render_image_selection_widget(
         if ui.is_mouse_down(MouseButton::Left) {
             draw_dashed_selection(
                 ui,
-                view_panel_min,
-                view_panel_max,
                 image_display_size,
                 image_pixel_size,
                 image_screen_min,
@@ -123,8 +119,6 @@ pub fn render_image_selection_widget(
 
 fn draw_dashed_selection(
     ui: &Ui,
-    view_panel_min: [f32; 2],
-    view_panel_max: [f32; 2],
     image_display_size: [f32; 2],
     image_pixel_size: [f32; 2],
     image_screen_min: [f32; 2],
