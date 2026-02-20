@@ -267,20 +267,7 @@ pub fn render_ui(
                         });
 
                     if app_state.show_info() {
-                        ui.separator();
-                        if let Some(entry) = app_state.current_entry() {
-                            ui.text(format!("File: {}", entry.file_name));
-                            ui.text(format!(
-                                "Format: {}  Size: {}",
-                                entry.format.as_str(),
-                                format_file_size(entry.file_size)
-                            ));
-                            if let Some((w, h)) = app_state.current_image_size() {
-                                ui.text(format!("Resolution: {} x {}", w, h));
-                            }
-                        } else {
-                            ui.text("No file selected");
-                        }
+                        render_file_info(ui, app_state);
                     }
                 });
         });
@@ -316,5 +303,22 @@ pub fn render_ui(
 
     if let Some(index) = clicked_index {
         app_state.select_index(index);
+    }
+}
+
+pub fn render_file_info(ui: &imgui::Ui, app_state: &ViewerState) {
+    ui.separator();
+    if let Some(entry) = app_state.current_entry() {
+        ui.text(format!("File: {}", entry.file_name));
+        ui.text(format!(
+            "Format: {}  Size: {}",
+            entry.format.as_str(),
+            format_file_size(entry.file_size)
+        ));
+        if let Some((w, h)) = app_state.current_image_size() {
+            ui.text(format!("Resolution: {} x {}", w, h));
+        }
+    } else {
+        ui.text("No file selected");
     }
 }

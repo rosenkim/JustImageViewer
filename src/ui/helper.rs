@@ -18,6 +18,7 @@ pub fn render_image_selection_widget(
 ) {
     if ui.is_key_pressed(Key::Escape) {
         app_state.clear_image_selection_state();
+        return;
     }
 
     if image_display_size[0] <= 0.0
@@ -126,14 +127,12 @@ fn draw_dashed_selection(
         image_pixel_size,
     );
 
-    draw_list.with_clip_rect(view_panel_min, view_panel_max, || {
-        draw_dashed_rect(
-            &draw_list,
-            selection_screen_min,
-            selection_screen_max,
-            color,
-        );
-    });
+    draw_dashed_rect(
+        &draw_list,
+        selection_screen_min,
+        selection_screen_max,
+        color,
+    );
 }
 
 fn draw_dashed_rect(
