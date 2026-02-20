@@ -86,22 +86,6 @@ pub fn render_image_selection_widget(
         }
     }
 
-    // if let Some(_popup) = ui.begin_popup(SELECTION_POPUP_ID) {
-    //     if app_state.image_selection().is_none() {
-    //         ui.close_current_popup();
-    //         return;
-    //     }
-
-    //     if ui.menu_item("Copy") {
-    //         copy_selected_region(app_state);
-    //         ui.close_current_popup();
-    //     }
-    //     if ui.menu_item("Cut") {
-    //         cut_selected_region(app_state);
-    //         ui.close_current_popup();
-    //     }
-    // }
-
     if let Some(selection) = app_state.image_selection() {
         let popup_screen_pos = image_to_screen(
             selection.max,
@@ -110,7 +94,7 @@ pub fn render_image_selection_widget(
             image_pixel_size,
         );
 
-        // imgui-rs에서 Popup 위치 지정 빌더를 제공하지 않으므로 FFI를 직접 호출
+        // imgui-rs doesn't provide a builder for setting popup position, so we use FFI directly
         unsafe {
             imgui::sys::igSetNextWindowPos(
                 imgui::sys::ImVec2 { x: popup_screen_pos[0] + 5.0, y: popup_screen_pos[1] + 5.0 },
