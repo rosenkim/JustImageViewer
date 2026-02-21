@@ -182,13 +182,27 @@ fn main() -> anyhow::Result<()> {
         font_scale
     );
 
-    // Load custom font (from config, under assets/fonts/)
-    let font_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+    // Load custom font from:
+    // 1) assets/fonts/
+    // 2) config directory root
+    // 3) config directory fonts/ subdirectory
+    let bundled_font_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("assets")
         .join("fonts")
         .join(&ui_font_filename);
+    let config_dir = infra::config::config_dir().ok();
+    let mut font_candidates = vec![bundled_font_path];
+    if let Some(config_dir) = config_dir {
+        font_candidates.push(config_dir.join(&ui_font_filename));
+        font_candidates.push(config_dir.join("fonts").join(&ui_font_filename));
+    }
+    let font_path = if ui_font_filename.is_empty() {
+        None
+    } else {
+        font_candidates.iter().find(|path| path.exists()).cloned()
+    };
 
-    if !ui_font_filename.is_empty() && font_path.exists() {
+    if let Some(font_path) = font_path {
         let font_data = std::fs::read(&font_path).expect("failed to read custom font file");
         // Leak the data so it lives for the entire program lifetime.
         // imgui requires the font data slice to live as long as the context.
@@ -218,9 +232,14 @@ fn main() -> anyhow::Result<()> {
             hidpi_factor
         );
     } else {
+        let checked_paths = font_candidates
+            .iter()
+            .map(|path| path.display().to_string())
+            .collect::<Vec<_>>()
+            .join(", ");
         log::warn!(
-            "Custom font not found at {}, using default imgui font",
-            font_path.display()
+            "Custom font not found. checked paths: {}. using default imgui font",
+            checked_paths
         );
     }
 

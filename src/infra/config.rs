@@ -4,7 +4,7 @@ use std::{
 };
 
 use anyhow::{Context, Result};
-use directories::ProjectDirs;
+use directories::BaseDirs;
 use serde::{Deserialize, Serialize};
 
 const QUALIFIER: &str = "dev";
@@ -78,14 +78,8 @@ pub struct ConfigHandle {
 
 /// Load config file, or create one from template on first run.
 pub fn load_or_create(reset_config: bool) -> Result<ConfigHandle> {
-    let Some(dirs) = ProjectDirs::from(QUALIFIER, ORGANIZATION, APPLICATION) else {
-        return Err(anyhow::anyhow!(
-            "failed to determine configuration directory for {QUALIFIER}.{ORGANIZATION}.{APPLICATION}"
-        ));
-    };
-
-    let config_dir = dirs.config_dir();
-    fs::create_dir_all(config_dir).with_context(|| {
+    let config_dir = config_dir()?;
+    fs::create_dir_all(&config_dir).with_context(|| {
         format!(
             "failed to create config directory at {}",
             config_dir.display()
@@ -122,6 +116,20 @@ pub fn load_or_create(reset_config: bool) -> Result<ConfigHandle> {
         settings,
         path: config_path,
     })
+}
+
+/// Configuration directory path:
+/// `$HOME/{QUALIFIER}.{ORGANIZATION}.{APPLICATION}` (Windows: `%USERPROFILE%/...`).
+pub fn config_dir() -> Result<PathBuf> {
+    let Some(base_dirs) = BaseDirs::new() else {
+        return Err(anyhow::anyhow!(
+            "failed to determine home directory for configuration path"
+        ));
+    };
+
+    Ok(base_dirs.home_dir().join(format!(
+        "{QUALIFIER}.{ORGANIZATION}.{APPLICATION}"
+    )))
 }
 
 /// Save current config state back to disk.
