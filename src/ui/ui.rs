@@ -1,6 +1,9 @@
-use crate::app::{ImageViewMode, LibrarySortField, SortDirection, ViewerState, format_file_size};
+use crate::app::{
+    ImageSelectionRect, ImageViewMode, LibrarySortField, SortDirection, ViewerState,
+    format_file_size,
+};
 use crate::render::texture_manager::UploadedTexture;
-use imgui::{Condition, MouseCursor, StyleVar};
+use imgui::{Condition, MouseCursor, StyleVar, TableFlags, Ui};
 
 use super::helper::render_image_selection_widget;
 use super::keyboard_shortcuts_window::render_keyboard_shortcuts_window;
@@ -10,6 +13,7 @@ const MIN_LIBRARY_WIDTH: f32 = 220.0;
 const MIN_VIEWER_WIDTH: f32 = 280.0;
 const LIBRARY_SORT_FIELDS: [&str; 3] = ["Name", "Date", "Size"];
 const LIBRARY_SORT_DIRECTIONS: [&str; 2] = ["Ascending", "Descending"];
+const MIN_SELECTION_SIZE: f32 = 1.0;
 
 pub fn render_ui(
     ui: &imgui::Ui,
@@ -243,17 +247,14 @@ pub fn render_ui(
         render_keyboard_shortcuts_window(ui, &mut open);
         app_state.set_show_keyboard_shortcuts(open);
     }
+    render_selection_window(ui, app_state);
 
     if let Some(index) = clicked_index {
         app_state.select_index(index);
     }
 }
 
-fn render_main_menu_bar(
-    ui: &imgui::Ui,
-    app_state: &mut ViewerState,
-    running: &mut bool,
-) {
+fn render_main_menu_bar(ui: &imgui::Ui, app_state: &mut ViewerState, running: &mut bool) {
     ui.main_menu_bar(|| {
         ui.menu("File", || {
             if ui.menu_item("Open Directory...") {
@@ -306,6 +307,17 @@ fn render_main_menu_bar(
                 }
             });
         });
+        ui.menu("Window", || {
+            let mut show_selection_window = app_state.show_selection_window();
+            if ui
+                .menu_item_config("Selection")
+                .selected(show_selection_window)
+                .build()
+            {
+                show_selection_window = !show_selection_window;
+                app_state.set_show_selection_window(show_selection_window);
+            }
+        });
         ui.menu("Help", || {
             if ui.menu_item("Keyboard Shortcuts") {
                 app_state.set_show_keyboard_shortcuts(true);
@@ -329,4 +341,113 @@ pub fn render_file_info(ui: &imgui::Ui, app_state: &ViewerState) {
     } else {
         ui.text("No file selected");
     }
+}
+
+fn render_selection_window(ui: &Ui, app_state: &mut ViewerState) {
+    if !app_state.show_selection_window() {
+        return;
+    }
+
+    let mut open = true;
+    ui.window("Selection")
+        .opened(&mut open)
+        .size([360.0, 280.0], Condition::FirstUseEver)
+        .build(|| {
+            ui.text("Image Coordinate System");
+            ui.separator();
+
+            let Some((image_w, image_h)) = app_state.current_image_size() else {
+                ui.text("No image loaded.");
+                return;
+            };
+
+            ui.text(format!("Image Size: {} x {}", image_w, image_h));
+            ui.separator();
+
+            let Some(selection) = app_state.image_selection() else {
+                ui.text("No selection.");
+                ui.text("Drag on the image to create a selection.");
+                return;
+            };
+
+            let mut edited = selection;
+            let mut changed = false;
+            let table_flags = TableFlags::BORDERS
+                | TableFlags::ROW_BG
+                | TableFlags::SIZING_STRETCH_PROP
+                | TableFlags::NO_SAVED_SETTINGS;
+
+            if let Some(_table) =
+                ui.begin_table_with_flags("selection_property_grid", 2, table_flags)
+            {
+                changed |=
+                    property_grid_float_row(ui, "Min X", "##selection_min_x", &mut edited.min[0]);
+                changed |=
+                    property_grid_float_row(ui, "Min Y", "##selection_min_y", &mut edited.min[1]);
+                changed |=
+                    property_grid_float_row(ui, "Max X", "##selection_max_x", &mut edited.max[0]);
+                changed |=
+                    property_grid_float_row(ui, "Max Y", "##selection_max_y", &mut edited.max[1]);
+
+                let mut width = edited.width();
+                if property_grid_float_row(ui, "Width", "##selection_width", &mut width) {
+                    edited.max[0] = edited.min[0] + width.max(MIN_SELECTION_SIZE);
+                    changed = true;
+                }
+
+                let mut height = edited.height();
+                if property_grid_float_row(ui, "Height", "##selection_height", &mut height) {
+                    edited.max[1] = edited.min[1] + height.max(MIN_SELECTION_SIZE);
+                    changed = true;
+                }
+            }
+
+            if changed {
+                let clamped =
+                    clamp_selection_rect_to_image(edited, [image_w as f32, image_h as f32]);
+                app_state.set_image_selection(Some(clamped));
+            }
+
+            ui.separator();
+            if ui.button("Clear Selection") {
+                app_state.clear_image_selection_state();
+            }
+        });
+
+    app_state.set_show_selection_window(open);
+}
+
+fn property_grid_float_row(ui: &Ui, name: &str, id: &str, value: &mut f32) -> bool {
+    ui.table_next_row();
+    ui.table_next_column();
+    ui.text(name);
+    ui.table_next_column();
+    ui.set_next_item_width(-1.0);
+    ui.input_float(id, value).display_format("%.1f").build()
+}
+
+fn clamp_selection_rect_to_image(
+    rect: ImageSelectionRect,
+    image_size: [f32; 2],
+) -> ImageSelectionRect {
+    let (min_x, max_x) = clamp_selection_axis(rect.min[0], rect.max[0], image_size[0]);
+    let (min_y, max_y) = clamp_selection_axis(rect.min[1], rect.max[1], image_size[1]);
+    ImageSelectionRect {
+        min: [min_x, min_y],
+        max: [max_x, max_y],
+    }
+}
+
+fn clamp_selection_axis(mut min: f32, mut max: f32, bound: f32) -> (f32, f32) {
+    let axis_bound = bound.max(MIN_SELECTION_SIZE);
+    min = min.clamp(0.0, axis_bound);
+    max = max.clamp(0.0, axis_bound);
+    if min > max {
+        std::mem::swap(&mut min, &mut max);
+    }
+    if max - min < MIN_SELECTION_SIZE {
+        max = (min + MIN_SELECTION_SIZE).min(axis_bound);
+        min = (max - MIN_SELECTION_SIZE).max(0.0);
+    }
+    (min, max)
 }

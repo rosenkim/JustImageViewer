@@ -57,6 +57,27 @@ impl ImageSelectionRect {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ImageSelectionResizeHandle {
+    Left,
+    Right,
+    Top,
+    Bottom,
+    TopLeft,
+    TopRight,
+    BottomLeft,
+    BottomRight,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum ImageSelectionDragMode {
+    Create,
+    Resize {
+        handle: ImageSelectionResizeHandle,
+        original: ImageSelectionRect,
+    },
+}
+
 pub struct ViewerState {
     config: AppConfig,
     config_path: PathBuf,
@@ -64,6 +85,7 @@ pub struct ViewerState {
     show_library: bool,
     show_info: bool,
     show_keyboard_shortcuts: bool,
+    show_selection_window: bool,
     current_directory: Option<PathBuf>,
     media_items: Vec<MediaEntry>,
     current_index: Option<usize>,
@@ -75,6 +97,7 @@ pub struct ViewerState {
     sort_direction: SortDirection,
     image_selection: Option<ImageSelectionRect>,
     image_selection_drag_start: Option<[f32; 2]>,
+    image_selection_drag_mode: Option<ImageSelectionDragMode>,
 }
 
 impl ViewerState {
@@ -88,6 +111,7 @@ impl ViewerState {
             show_library: true,
             show_info: true,
             show_keyboard_shortcuts: false,
+            show_selection_window: false,
             current_directory: None,
             media_items: Vec::new(),
             current_index: None,
@@ -99,6 +123,7 @@ impl ViewerState {
             sort_direction: SortDirection::Ascending,
             image_selection: None,
             image_selection_drag_start: None,
+            image_selection_drag_mode: None,
         }
     }
 
@@ -128,6 +153,14 @@ impl ViewerState {
 
     pub fn set_show_keyboard_shortcuts(&mut self, show: bool) {
         self.show_keyboard_shortcuts = show;
+    }
+
+    pub fn show_selection_window(&self) -> bool {
+        self.show_selection_window
+    }
+
+    pub fn set_show_selection_window(&mut self, show: bool) {
+        self.show_selection_window = show;
     }
 
     pub fn config_path(&self) -> &Path {
@@ -197,17 +230,24 @@ impl ViewerState {
         self.image_selection_drag_start
     }
 
-    pub fn begin_image_selection_drag(&mut self, start: [f32; 2]) {
+    pub fn image_selection_drag_mode(&self) -> Option<ImageSelectionDragMode> {
+        self.image_selection_drag_mode
+    }
+
+    pub fn begin_image_selection_drag(&mut self, start: [f32; 2], mode: ImageSelectionDragMode) {
         self.image_selection_drag_start = Some(start);
+        self.image_selection_drag_mode = Some(mode);
     }
 
     pub fn clear_image_selection_drag(&mut self) {
         self.image_selection_drag_start = None;
+        self.image_selection_drag_mode = None;
     }
 
     pub fn clear_image_selection_state(&mut self) {
         self.image_selection = None;
         self.image_selection_drag_start = None;
+        self.image_selection_drag_mode = None;
     }
 
     pub fn library_sort_field(&self) -> LibrarySortField {

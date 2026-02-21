@@ -127,9 +127,9 @@ pub fn config_dir() -> Result<PathBuf> {
         ));
     };
 
-    Ok(base_dirs.home_dir().join(format!(
-        "{QUALIFIER}.{ORGANIZATION}.{APPLICATION}"
-    )))
+    Ok(base_dirs
+        .home_dir()
+        .join(format!("{QUALIFIER}.{ORGANIZATION}.{APPLICATION}")))
 }
 
 /// Save current config state back to disk.
