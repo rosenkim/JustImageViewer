@@ -17,67 +17,10 @@ pub fn render_ui(
     current_texture: Option<UploadedTexture>,
     running: &mut bool,
 ) {
-    ui.main_menu_bar(|| {
-        ui.menu("File", || {
-            if ui.menu_item("Open Directory...") {
-                app_state.open_directory_dialog();
-            }
-            if ui.menu_item("Quit") {
-                *running = false;
-            }
-        });
-        ui.menu("View", || {
-            ui.menu("Layout", || {
-                let mut show_library = app_state.show_library();
-                if ui
-                    .menu_item_config("Library")
-                    .selected(show_library)
-                    .build()
-                {
-                    show_library = !show_library;
-                    app_state.set_show_library(show_library);
-                }
-
-                let mut show_info = app_state.show_info();
-                if ui.menu_item_config("Info").selected(show_info).build() {
-                    show_info = !show_info;
-                    app_state.set_show_info(show_info);
-                }
-            });
-            ui.menu("Image", || {
-                let image_mode = app_state.image_view_mode();
-                if ui
-                    .selectable_config("Original")
-                    .selected(image_mode == ImageViewMode::Original)
-                    .build()
-                {
-                    app_state.set_image_view_mode(ImageViewMode::Original);
-                }
-                if ui
-                    .selectable_config("Fit to Window")
-                    .selected(image_mode == ImageViewMode::FitToWindow)
-                    .build()
-                {
-                    app_state.set_image_view_mode(ImageViewMode::FitToWindow);
-                }
-                if ui
-                    .selectable_config("Fit to Width")
-                    .selected(image_mode == ImageViewMode::FitToWidth)
-                    .build()
-                {
-                    app_state.set_image_view_mode(ImageViewMode::FitToWidth);
-                }
-            });
-        });
-        ui.menu("Help", || {
-            if ui.menu_item("Keyboard Shortcuts") {
-                app_state.set_show_keyboard_shortcuts(true);
-            }
-        });
-    });
+    render_main_menu_bar(ui, app_state, running);
 
     let display = ui.io().display_size;
-    let menu_height = 20.0;
+    let menu_height = ui.io().font_global_scale * 20.0;
     let status_height = 28.0;
     let content_height = (display[1] - menu_height - status_height).max(120.0);
     let window_flags = imgui::WindowFlags::NO_MOVE
@@ -304,6 +247,71 @@ pub fn render_ui(
     if let Some(index) = clicked_index {
         app_state.select_index(index);
     }
+}
+
+fn render_main_menu_bar(
+    ui: &imgui::Ui,
+    app_state: &mut ViewerState,
+    running: &mut bool,
+) {
+    ui.main_menu_bar(|| {
+        ui.menu("File", || {
+            if ui.menu_item("Open Directory...") {
+                app_state.open_directory_dialog();
+            }
+            if ui.menu_item("Quit") {
+                *running = false;
+            }
+        });
+        ui.menu("View", || {
+            ui.menu("Layout", || {
+                let mut show_library = app_state.show_library();
+                if ui
+                    .menu_item_config("Library")
+                    .selected(show_library)
+                    .build()
+                {
+                    show_library = !show_library;
+                    app_state.set_show_library(show_library);
+                }
+
+                let mut show_info = app_state.show_info();
+                if ui.menu_item_config("Info").selected(show_info).build() {
+                    show_info = !show_info;
+                    app_state.set_show_info(show_info);
+                }
+            });
+            ui.menu("Image", || {
+                let image_mode = app_state.image_view_mode();
+                if ui
+                    .selectable_config("Original")
+                    .selected(image_mode == ImageViewMode::Original)
+                    .build()
+                {
+                    app_state.set_image_view_mode(ImageViewMode::Original);
+                }
+                if ui
+                    .selectable_config("Fit to Window")
+                    .selected(image_mode == ImageViewMode::FitToWindow)
+                    .build()
+                {
+                    app_state.set_image_view_mode(ImageViewMode::FitToWindow);
+                }
+                if ui
+                    .selectable_config("Fit to Width")
+                    .selected(image_mode == ImageViewMode::FitToWidth)
+                    .build()
+                {
+                    app_state.set_image_view_mode(ImageViewMode::FitToWidth);
+                }
+            });
+        });
+        ui.menu("Help", || {
+            if ui.menu_item("Keyboard Shortcuts") {
+                app_state.set_show_keyboard_shortcuts(true);
+            }
+        });
+    });
 }
 
 pub fn render_file_info(ui: &imgui::Ui, app_state: &ViewerState) {

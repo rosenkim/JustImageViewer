@@ -21,6 +21,7 @@ pub struct AppConfig {
     pub last_open_directory: Option<PathBuf>,
     pub ui_font_filename: String,
     pub ui_font_size_pixels: f32,
+    pub ui_scale_factor: f32,
     pub background_style: BackgroundStyle,
     #[serde(alias = "max_cache_size")]
     pub texture_cache_max_entries: usize,
@@ -33,6 +34,7 @@ impl Default for AppConfig {
             last_open_directory: None,
             ui_font_filename: String::new(),
             ui_font_size_pixels: 14.0,
+            ui_scale_factor: 1.0,
             background_style: BackgroundStyle::default(),
             texture_cache_max_entries: 20,
         }

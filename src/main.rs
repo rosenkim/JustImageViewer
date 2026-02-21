@@ -102,6 +102,7 @@ fn main() -> anyhow::Result<()> {
             .context("failed to create window")?,
     );
 
+    // let instance = make_instance();
     let instance = wgpu::Instance::default();
     let surface = instance
         .create_surface(window.clone())
@@ -149,14 +150,37 @@ fn main() -> anyhow::Result<()> {
         14.0
     };
 
+    let ui_scale_factor = if app_state.config().ui_scale_factor > 0.0 {
+        app_state.config().ui_scale_factor
+    } else {
+        log::warn!(
+            "Invalid ui_scale_factor ({}). Falling back to 1.0",
+            app_state.config().ui_scale_factor
+        );
+        1.0
+    };
+
     let mut platform = WinitPlatform::init(&mut imgui);
     platform.attach_window(imgui.io_mut(), window.as_ref(), HiDpiMode::Default);
 
     let hidpi_factor = window.scale_factor() as f32;
-    if hidpi_factor > 0.0 && (hidpi_factor - 1.0).abs() > f32::EPSILON {
-        imgui.io_mut().font_global_scale = 1.0 / hidpi_factor;
-        log::info!("Detected DPI scale: {:.2}", hidpi_factor);
-    }
+    let font_scale = if hidpi_factor > 0.0 {
+        if (hidpi_factor - 1.0).abs() > f32::EPSILON {
+            ui_scale_factor / hidpi_factor
+        } else {
+            ui_scale_factor
+        }
+    } else {
+        ui_scale_factor
+    };
+
+    imgui.io_mut().font_global_scale = font_scale;
+    log::info!(
+        "Detected DPI scale: {:.2}, ui_scale_factor: {:.2}, effective font_global_scale: {:.2}",
+        hidpi_factor,
+        ui_scale_factor,
+        font_scale
+    );
 
     // Load custom font (from config, under assets/fonts/)
     let font_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -169,10 +193,11 @@ fn main() -> anyhow::Result<()> {
         // Leak the data so it lives for the entire program lifetime.
         // imgui requires the font data slice to live as long as the context.
         let font_data: &'static [u8] = Box::leak(font_data.into_boxed_slice());
+        let font_size = ui_font_size_pixels * hidpi_factor.max(1.0);
 
         imgui.fonts().add_font(&[FontSource::TtfData {
             data: font_data,
-            size_pixels: ui_font_size_pixels * hidpi_factor.max(1.0),
+            size_pixels: font_size,
             config: Some(FontConfig {
                 glyph_ranges: FontGlyphRanges::from_slice(&[
                     // Basic Latin + Latin Supplement

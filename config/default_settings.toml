@@ -8,6 +8,8 @@ restore_last_directory = true
 ui_font_filename = "NanumGothic.ttf"
 # UI font size in pixels
 ui_font_size_pixels = 14.0
+#! Global UI scale factor (1.0 = 100%)
+ui_scale_factor = 1.0
 
 [texture]
 # Maximum number of cached textures
