@@ -60,6 +60,13 @@ impl Rect2D {
         }
     }
 
+    pub fn from_point_size(x:f32,y:f32,width:f32,height:f32)-> Self {
+        Self {
+            min: Point2D::new(x, y),
+            max: Point2D::new(x + width, y + height),
+        }
+    }
+
     pub fn center(&self) -> Point2D {
         Point2D::new((self.min.x + self.max.x) / 2.0, (self.min.y + self.max.y) / 2.0)
     }

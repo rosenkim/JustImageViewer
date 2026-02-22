@@ -51,6 +51,9 @@ pub enum ImageSelectionResizeHandle {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum ImageSelectionDragMode {
     Create,
+    Move {
+        original: Rect2D,
+    },
     Resize {
         handle: ImageSelectionResizeHandle,
         original: Rect2D,
