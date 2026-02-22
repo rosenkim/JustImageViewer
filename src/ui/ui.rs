@@ -3,7 +3,7 @@ use crate::app::{
     format_file_size,
 };
 use crate::math::{Point2D, Rect2D};
-use crate::render::texture_manager::UploadedTexture;
+use crate::render::image_manager::DisplayImage;
 use imgui::{Condition, MouseCursor, StyleVar, TableFlags, Ui};
 
 use super::helper::render_image_selection_widget;
@@ -19,7 +19,7 @@ const MIN_SELECTION_SIZE: f32 = 1.0;
 pub fn render_ui(
     ui: &imgui::Ui,
     app_state: &mut ViewerState,
-    current_texture: Option<UploadedTexture>,
+    current_texture: Option<DisplayImage>,
     running: &mut bool,
 ) {
     render_main_menu_bar(ui, app_state, running);
@@ -191,7 +191,21 @@ pub fn render_ui(
                                     cursor[1] + centered[1],
                                 ]);
 
-                                imgui::Image::new(texture.id, display_size).build(ui);
+                                let texel_width: f32 = 1.0 / texture.tex_width as f32;
+                                let texel_height: f32 = 1.0 / texture.tex_height as f32;
+
+                                let offset_x: f32 = 0.0;
+                                let offset_y: f32 = 0.0;
+                                let uv0 = [0.0 + offset_x, 0.0 + offset_y];
+                                let uv1 = [
+                                    (texture.width as f32 * texel_width) + offset_x,
+                                    (texture.height as f32 * texel_height) + offset_y,
+                                ];
+
+                                imgui::Image::new(texture.id, display_size)
+                                    .uv0(uv0)
+                                    .uv1(uv1)
+                                    .build(ui);
 
                                 let view_panel_min = ui.window_pos();
                                 let view_panel_max = [

@@ -1,1 +1,1 @@
-pub mod texture_manager;
+pub mod image_manager;
