@@ -9,6 +9,24 @@ const SELECTION_LINE_THICKNESS: f32 = 1.5;
 const MIN_SELECTION_SIZE: f32 = 1.0;
 const SELECTION_RESIZE_HIT_PADDING: f32 = 8.0;
 
+type SelectionPopupAction = fn(&mut ViewerState);
+
+struct SelectionPopupItem {
+    name: &'static str,
+    action: SelectionPopupAction,
+}
+
+const SELECTION_POPUP_ITEMS: &[SelectionPopupItem] = &[
+    SelectionPopupItem {
+        name: "Copy",
+        action: copy_selected_region,
+    },
+    SelectionPopupItem {
+        name: "Cut",
+        action: cut_selected_region,
+    },
+];
+
 pub fn render_image_selection_widget(
     ui: &Ui,
     app_state: &mut ViewerState,
@@ -193,7 +211,6 @@ pub fn render_image_selection_widget(
 
     if is_hovering_view_panel
         && ui.is_mouse_clicked(MouseButton::Right)
-        && app_state.image_selection().is_some()
         && app_state.image_selection_drag_start().is_none()
     {
         ui.open_popup(SELECTION_POPUP_ID);
@@ -214,21 +231,7 @@ pub fn render_image_selection_widget(
         }
     }
 
-    if let Some(_popup) = ui.begin_popup(SELECTION_POPUP_ID) {
-        if app_state.image_selection().is_none() {
-            ui.close_current_popup();
-            return;
-        }
-
-        if ui.menu_item("Copy") {
-            copy_selected_region(app_state);
-            ui.close_current_popup();
-        }
-        if ui.menu_item("Cut") {
-            cut_selected_region(app_state);
-            ui.close_current_popup();
-        }
-    }
+    render_selection_popup(ui, app_state);
 }
 
 fn draw_dashed_selection(
@@ -457,6 +460,24 @@ fn image_to_screen(
     Point2D {
         x: image_screen_min[0] + (image_pos.x / image_pixel_size[0]) * image_display_size[0],
         y: image_screen_min[1] + (image_pos.y / image_pixel_size[1]) * image_display_size[1],
+    }
+}
+
+fn render_selection_popup(ui: &Ui, app_state: &mut ViewerState) {
+    if let Some(_popup) = ui.begin_popup(SELECTION_POPUP_ID) {
+        let has_selection = app_state.image_selection().is_some();
+
+        for item in SELECTION_POPUP_ITEMS {
+            if ui
+                .menu_item_config(item.name)
+                .enabled(has_selection)
+                .build()
+            {
+                (item.action)(app_state);
+                ui.close_current_popup();
+                break;
+            }
+        }
     }
 }
 
