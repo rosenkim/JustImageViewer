@@ -1,6 +1,7 @@
 use crate::app::{
-    ImageSelectionDragMode, ImageSelectionRect, ImageSelectionResizeHandle, ViewerState,
+    ImageSelectionDragMode, ImageSelectionResizeHandle, ViewerState,
 };
+use crate::math::{Point2D, Rect2D};
 use imgui::{ImColor32, Key, MouseButton, MouseCursor, Ui};
 
 const SELECTION_POPUP_ID: &str = "image_selection_popup";
@@ -19,11 +20,13 @@ pub fn render_image_selection_widget(
     image_display_size: [f32; 2],
     image_pixel_size: [f32; 2],
 ) {
+    // Escape key clears any selection/drag state
     if ui.is_key_pressed(Key::Escape) {
         app_state.clear_image_selection_state();
         return;
     }
 
+    // If image metrics are invalid, bail out early
     if image_display_size[0] <= 0.0
         || image_display_size[1] <= 0.0
         || image_pixel_size[0] <= 0.0
@@ -34,7 +37,7 @@ pub fn render_image_selection_widget(
     }
 
     let is_hovering_view_panel = ui.is_mouse_hovering_rect(view_panel_min, view_panel_max);
-    let mouse_pos = ui.io().mouse_pos;
+    let mouse_pos: Point2D = Point2D::from_array(ui.io().mouse_pos);
 
     let active_resize_handle = app_state
         .image_selection_drag_mode()
@@ -66,8 +69,10 @@ pub fn render_image_selection_widget(
             image_screen_min,
             image_display_size,
             image_pixel_size,
-        );
+        )
+        .to_array();
 
+        // Decide whether to create or resize an existing selection
         let drag_mode = app_state
             .image_selection()
             .and_then(|selection| {
@@ -101,20 +106,34 @@ pub fn render_image_selection_widget(
 
     let mut popup_screen_pos_override: Option<[f32; 2]> = None;
 
+    // Handle drag preview and finalize selection
     if let (Some(start), Some(drag_mode)) = (
         app_state.image_selection_drag_start(),
         app_state.image_selection_drag_mode(),
     ) {
+        // Get current mouse position in image space
         let current = screen_to_image(
-            ui.io().mouse_pos,
+            Point2D::from_array(ui.io().mouse_pos),
             image_screen_min,
             image_display_size,
             image_pixel_size,
         );
+
+        // Live preview rect based on drag mode
         let preview = match drag_mode {
-            ImageSelectionDragMode::Create => ImageSelectionRect::from_points(start, current),
+            ImageSelectionDragMode::Create => {
+                // Create a new selection from start to current mouse position
+                Rect2D::from_points(Point2D::from_array(start), current)
+            }
             ImageSelectionDragMode::Resize { handle, original } => {
-                resize_selection(original, handle, start, current, image_pixel_size)
+                // Resize existing selection based on handle and mouse movement
+                resize_selection(
+                    original,
+                    handle,
+                    Point2D::from_array(start),
+                    current,
+                    image_pixel_size,
+                )
             }
         };
 
@@ -134,12 +153,15 @@ pub fn render_image_selection_widget(
                 app_state.set_image_selection(Some(preview));
                 if matches!(drag_mode, ImageSelectionDragMode::Create) {
                     ui.open_popup(SELECTION_POPUP_ID);
-                    popup_screen_pos_override = Some(image_to_screen(
-                        preview.max,
-                        image_screen_min,
-                        image_display_size,
-                        image_pixel_size,
-                    ));
+                    popup_screen_pos_override = Some(
+                        image_to_screen(
+                            preview.max,
+                            image_screen_min,
+                            image_display_size,
+                            image_pixel_size,
+                        )
+                        .to_array(),
+                    );
                 }
             }
             app_state.clear_image_selection_drag();
@@ -152,7 +174,7 @@ pub fn render_image_selection_widget(
         && app_state.image_selection_drag_start().is_none()
     {
         ui.open_popup(SELECTION_POPUP_ID);
-        popup_screen_pos_override = Some(mouse_pos);
+        popup_screen_pos_override = Some(mouse_pos.to_array());
     }
 
     if let Some(popup_screen_pos) = popup_screen_pos_override {
@@ -191,22 +213,25 @@ fn draw_dashed_selection(
     image_display_size: [f32; 2],
     image_pixel_size: [f32; 2],
     image_screen_min: [f32; 2],
-    selection: ImageSelectionRect,
+    selection: Rect2D,
     color: ImColor32,
 ) {
+    // Convert selection bounds to screen space and draw dashed outline
     let draw_list = ui.get_window_draw_list();
     let selection_screen_min = image_to_screen(
         selection.min,
         image_screen_min,
         image_display_size,
         image_pixel_size,
-    );
+    )
+    .to_array();
     let selection_screen_max = image_to_screen(
         selection.max,
         image_screen_min,
         image_display_size,
         image_pixel_size,
-    );
+    )
+    .to_array();
 
     draw_dashed_rect(
         &draw_list,
@@ -217,12 +242,13 @@ fn draw_dashed_selection(
 }
 
 fn resolve_resize_handle(
-    mouse_screen: [f32; 2],
-    selection: ImageSelectionRect,
+    mouse_screen: Point2D,
+    selection: Rect2D,
     image_screen_min: [f32; 2],
     image_display_size: [f32; 2],
     image_pixel_size: [f32; 2],
 ) -> Option<ImageSelectionResizeHandle> {
+    // Hit-test the mouse against the selection edges/corners
     let selection_screen_min = image_to_screen(
         selection.min,
         image_screen_min,
@@ -236,65 +262,37 @@ fn resolve_resize_handle(
         image_pixel_size,
     );
     let padding = SELECTION_RESIZE_HIT_PADDING;
-    let in_expanded_bounds = mouse_screen[0] >= selection_screen_min[0] - padding
-        && mouse_screen[0] <= selection_screen_max[0] + padding
-        && mouse_screen[1] >= selection_screen_min[1] - padding
-        && mouse_screen[1] <= selection_screen_max[1] + padding;
+    let in_expanded_bounds = mouse_screen.x >= selection_screen_min.x - padding
+        && mouse_screen.x <= selection_screen_max.x + padding
+        && mouse_screen.y >= selection_screen_min.y - padding
+        && mouse_screen.y <= selection_screen_max.y + padding;
     if !in_expanded_bounds {
         return None;
     }
 
-    let near_left = (mouse_screen[0] - selection_screen_min[0]).abs() <= padding;
-    let near_right = (mouse_screen[0] - selection_screen_max[0]).abs() <= padding;
-    let near_top = (mouse_screen[1] - selection_screen_min[1]).abs() <= padding;
-    let near_bottom = (mouse_screen[1] - selection_screen_max[1]).abs() <= padding;
+    let near_left = (mouse_screen.x - selection_screen_min.x).abs() <= padding;
+    let near_right = (mouse_screen.x - selection_screen_max.x).abs() <= padding;
+    let near_top = (mouse_screen.y - selection_screen_min.y).abs() <= padding;
+    let near_bottom = (mouse_screen.y - selection_screen_max.y).abs() <= padding;
 
     if near_left && near_top {
         return Some(ImageSelectionResizeHandle::TopLeft);
-    }
-    if near_right && near_top {
+    }else if near_right && near_top {
         return Some(ImageSelectionResizeHandle::TopRight);
-    }
-    if near_left && near_bottom {
+    }else if near_left && near_bottom {
         return Some(ImageSelectionResizeHandle::BottomLeft);
-    }
-    if near_right && near_bottom {
+    }else if near_right && near_bottom {
         return Some(ImageSelectionResizeHandle::BottomRight);
-    }
-    if near_left {
+    }else if near_left {
         return Some(ImageSelectionResizeHandle::Left);
-    }
-    if near_right {
+    }else if near_right {
         return Some(ImageSelectionResizeHandle::Right);
-    }
-    if near_top {
+    }else if near_top {
         return Some(ImageSelectionResizeHandle::Top);
-    }
-    if near_bottom {
+    }else if near_bottom {
         return Some(ImageSelectionResizeHandle::Bottom);
     }
-
-    let inside_selection = mouse_screen[0] >= selection_screen_min[0]
-        && mouse_screen[0] <= selection_screen_max[0]
-        && mouse_screen[1] >= selection_screen_min[1]
-        && mouse_screen[1] <= selection_screen_max[1];
-    if !inside_selection {
-        return None;
-    }
-
-    let center = [
-        (selection_screen_min[0] + selection_screen_max[0]) * 0.5,
-        (selection_screen_min[1] + selection_screen_max[1]) * 0.5,
-    ];
-    let is_left = mouse_screen[0] <= center[0];
-    let is_top = mouse_screen[1] <= center[1];
-
-    Some(match (is_left, is_top) {
-        (true, true) => ImageSelectionResizeHandle::TopLeft,
-        (false, true) => ImageSelectionResizeHandle::TopRight,
-        (true, false) => ImageSelectionResizeHandle::BottomLeft,
-        (false, false) => ImageSelectionResizeHandle::BottomRight,
-    })
+    None
 }
 
 fn cursor_for_resize_handle(handle: ImageSelectionResizeHandle) -> MouseCursor {
@@ -315,55 +313,56 @@ fn cursor_for_resize_handle(handle: ImageSelectionResizeHandle) -> MouseCursor {
 }
 
 fn resize_selection(
-    original: ImageSelectionRect,
+    original: Rect2D,
     handle: ImageSelectionResizeHandle,
-    drag_start: [f32; 2],
-    drag_current: [f32; 2],
+    drag_start: Point2D,
+    drag_current: Point2D,
     image_pixel_size: [f32; 2],
-) -> ImageSelectionRect {
-    let delta_x = drag_current[0] - drag_start[0];
-    let delta_y = drag_current[1] - drag_start[1];
+) -> Rect2D {
+    // Move the grabbed edge/corner while clamping to image bounds
+    let delta_x = drag_current.x - drag_start.x;
+    let delta_y = drag_current.y - drag_start.y;
     let mut min = original.min;
     let mut max = original.max;
 
     match handle {
         ImageSelectionResizeHandle::Left => {
-            min[0] = (original.min[0] + delta_x).clamp(0.0, original.max[0] - MIN_SELECTION_SIZE);
+            min.x = (original.min.x + delta_x).clamp(0.0, original.max.x - MIN_SELECTION_SIZE);
         }
         ImageSelectionResizeHandle::Right => {
-            max[0] = (original.max[0] + delta_x)
-                .clamp(original.min[0] + MIN_SELECTION_SIZE, image_pixel_size[0]);
+            max.x = (original.max.x + delta_x)
+                .clamp(original.min.x + MIN_SELECTION_SIZE, image_pixel_size[0]);
         }
         ImageSelectionResizeHandle::Top => {
-            min[1] = (original.min[1] + delta_y).clamp(0.0, original.max[1] - MIN_SELECTION_SIZE);
+            min.y = (original.min.y + delta_y).clamp(0.0, original.max.y - MIN_SELECTION_SIZE);
         }
         ImageSelectionResizeHandle::Bottom => {
-            max[1] = (original.max[1] + delta_y)
-                .clamp(original.min[1] + MIN_SELECTION_SIZE, image_pixel_size[1]);
+            max.y = (original.max.y + delta_y)
+                .clamp(original.min.y + MIN_SELECTION_SIZE, image_pixel_size[1]);
         }
         ImageSelectionResizeHandle::TopLeft => {
-            min[0] = (original.min[0] + delta_x).clamp(0.0, original.max[0] - MIN_SELECTION_SIZE);
-            min[1] = (original.min[1] + delta_y).clamp(0.0, original.max[1] - MIN_SELECTION_SIZE);
+            min.x = (original.min.x + delta_x).clamp(0.0, original.max.x - MIN_SELECTION_SIZE);
+            min.y = (original.min.y + delta_y).clamp(0.0, original.max.y - MIN_SELECTION_SIZE);
         }
         ImageSelectionResizeHandle::TopRight => {
-            max[0] = (original.max[0] + delta_x)
-                .clamp(original.min[0] + MIN_SELECTION_SIZE, image_pixel_size[0]);
-            min[1] = (original.min[1] + delta_y).clamp(0.0, original.max[1] - MIN_SELECTION_SIZE);
+            max.x = (original.max.x + delta_x)
+                .clamp(original.min.x + MIN_SELECTION_SIZE, image_pixel_size[0]);
+            min.y = (original.min.y + delta_y).clamp(0.0, original.max.y - MIN_SELECTION_SIZE);
         }
         ImageSelectionResizeHandle::BottomLeft => {
-            min[0] = (original.min[0] + delta_x).clamp(0.0, original.max[0] - MIN_SELECTION_SIZE);
-            max[1] = (original.max[1] + delta_y)
-                .clamp(original.min[1] + MIN_SELECTION_SIZE, image_pixel_size[1]);
+            min.x = (original.min.x + delta_x).clamp(0.0, original.max.x - MIN_SELECTION_SIZE);
+            max.y = (original.max.y + delta_y)
+                .clamp(original.min.y + MIN_SELECTION_SIZE, image_pixel_size[1]);
         }
         ImageSelectionResizeHandle::BottomRight => {
-            max[0] = (original.max[0] + delta_x)
-                .clamp(original.min[0] + MIN_SELECTION_SIZE, image_pixel_size[0]);
-            max[1] = (original.max[1] + delta_y)
-                .clamp(original.min[1] + MIN_SELECTION_SIZE, image_pixel_size[1]);
+            max.x = (original.max.x + delta_x)
+                .clamp(original.min.x + MIN_SELECTION_SIZE, image_pixel_size[0]);
+            max.y = (original.max.y + delta_y)
+                .clamp(original.min.y + MIN_SELECTION_SIZE, image_pixel_size[1]);
         }
     }
 
-    ImageSelectionRect { min, max }
+    Rect2D { min, max }
 }
 
 fn draw_dashed_rect(
@@ -411,31 +410,31 @@ fn draw_dashed_line(
 }
 
 fn screen_to_image(
-    screen_pos: [f32; 2],
+    screen_pos: Point2D,
     image_screen_min: [f32; 2],
     image_display_size: [f32; 2],
     image_pixel_size: [f32; 2],
-) -> [f32; 2] {
+) -> Point2D {
     let normalized_x =
-        ((screen_pos[0] - image_screen_min[0]) / image_display_size[0]).clamp(0.0, 1.0);
+        ((screen_pos.x - image_screen_min[0]) / image_display_size[0]).clamp(0.0, 1.0);
     let normalized_y =
-        ((screen_pos[1] - image_screen_min[1]) / image_display_size[1]).clamp(0.0, 1.0);
-    [
-        normalized_x * image_pixel_size[0],
-        normalized_y * image_pixel_size[1],
-    ]
+        ((screen_pos.y - image_screen_min[1]) / image_display_size[1]).clamp(0.0, 1.0);
+    Point2D {
+        x: normalized_x * image_pixel_size[0],
+        y: normalized_y * image_pixel_size[1],
+    }
 }
 
 fn image_to_screen(
-    image_pos: [f32; 2],
+    image_pos: Point2D,
     image_screen_min: [f32; 2],
     image_display_size: [f32; 2],
     image_pixel_size: [f32; 2],
-) -> [f32; 2] {
-    [
-        image_screen_min[0] + (image_pos[0] / image_pixel_size[0]) * image_display_size[0],
-        image_screen_min[1] + (image_pos[1] / image_pixel_size[1]) * image_display_size[1],
-    ]
+) -> Point2D {
+    Point2D {
+        x: image_screen_min[0] + (image_pos.x / image_pixel_size[0]) * image_display_size[0],
+        y: image_screen_min[1] + (image_pos.y / image_pixel_size[1]) * image_display_size[1],
+    }
 }
 
 fn copy_selected_region(_app_state: &mut ViewerState) {

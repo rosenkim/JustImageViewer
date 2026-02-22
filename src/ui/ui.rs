@@ -1,7 +1,8 @@
 use crate::app::{
-    ImageSelectionRect, ImageViewMode, LibrarySortField, SortDirection, ViewerState,
+    ImageViewMode, LibrarySortField, SortDirection, ViewerState,
     format_file_size,
 };
+use crate::math::{Point2D, Rect2D};
 use crate::render::texture_manager::UploadedTexture;
 use imgui::{Condition, MouseCursor, StyleVar, TableFlags, Ui};
 
@@ -381,23 +382,23 @@ fn render_selection_window(ui: &Ui, app_state: &mut ViewerState) {
                 ui.begin_table_with_flags("selection_property_grid", 2, table_flags)
             {
                 changed |=
-                    property_grid_float_row(ui, "Min X", "##selection_min_x", &mut edited.min[0]);
+                    property_grid_float_row(ui, "Min X", "##selection_min_x", &mut edited.min.x);
                 changed |=
-                    property_grid_float_row(ui, "Min Y", "##selection_min_y", &mut edited.min[1]);
+                    property_grid_float_row(ui, "Min Y", "##selection_min_y", &mut edited.min.y);
                 changed |=
-                    property_grid_float_row(ui, "Max X", "##selection_max_x", &mut edited.max[0]);
+                    property_grid_float_row(ui, "Max X", "##selection_max_x", &mut edited.max.x);
                 changed |=
-                    property_grid_float_row(ui, "Max Y", "##selection_max_y", &mut edited.max[1]);
+                    property_grid_float_row(ui, "Max Y", "##selection_max_y", &mut edited.max.y);
 
                 let mut width = edited.width();
                 if property_grid_float_row(ui, "Width", "##selection_width", &mut width) {
-                    edited.max[0] = edited.min[0] + width.max(MIN_SELECTION_SIZE);
+                    edited.max.x = edited.min.x + width.max(MIN_SELECTION_SIZE);
                     changed = true;
                 }
 
                 let mut height = edited.height();
                 if property_grid_float_row(ui, "Height", "##selection_height", &mut height) {
-                    edited.max[1] = edited.min[1] + height.max(MIN_SELECTION_SIZE);
+                    edited.max.y = edited.min.y + height.max(MIN_SELECTION_SIZE);
                     changed = true;
                 }
             }
@@ -427,15 +428,13 @@ fn property_grid_float_row(ui: &Ui, name: &str, id: &str, value: &mut f32) -> bo
 }
 
 fn clamp_selection_rect_to_image(
-    rect: ImageSelectionRect,
+    rect: Rect2D,
     image_size: [f32; 2],
-) -> ImageSelectionRect {
-    let (min_x, max_x) = clamp_selection_axis(rect.min[0], rect.max[0], image_size[0]);
-    let (min_y, max_y) = clamp_selection_axis(rect.min[1], rect.max[1], image_size[1]);
-    ImageSelectionRect {
-        min: [min_x, min_y],
-        max: [max_x, max_y],
-    }
+) -> Rect2D {
+    let (min_x, max_x) = clamp_selection_axis(rect.min.x, rect.max.x, image_size[0]);
+    let (min_y, max_y) = clamp_selection_axis(rect.min.y, rect.max.y, image_size[1]);
+
+    Rect2D::new(Point2D::new(min_x, min_y), Point2D::new(max_x, max_y))
 }
 
 fn clamp_selection_axis(mut min: f32, mut max: f32, bound: f32) -> (f32, f32) {

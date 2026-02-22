@@ -14,6 +14,8 @@ use crate::{
     infra::config::AppConfig,
 };
 
+pub use crate::math::Rect2D;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ImageViewMode {
     Original,
@@ -34,29 +36,6 @@ pub enum SortDirection {
     Descending,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct ImageSelectionRect {
-    pub min: [f32; 2],
-    pub max: [f32; 2],
-}
-
-impl ImageSelectionRect {
-    pub fn from_points(start: [f32; 2], end: [f32; 2]) -> Self {
-        Self {
-            min: [start[0].min(end[0]), start[1].min(end[1])],
-            max: [start[0].max(end[0]), start[1].max(end[1])],
-        }
-    }
-
-    pub fn width(&self) -> f32 {
-        self.max[0] - self.min[0]
-    }
-
-    pub fn height(&self) -> f32 {
-        self.max[1] - self.min[1]
-    }
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ImageSelectionResizeHandle {
     Left,
@@ -74,7 +53,7 @@ pub enum ImageSelectionDragMode {
     Create,
     Resize {
         handle: ImageSelectionResizeHandle,
-        original: ImageSelectionRect,
+        original: Rect2D,
     },
 }
 
@@ -95,7 +74,7 @@ pub struct ViewerState {
     image_view_mode: ImageViewMode,
     library_sort_field: LibrarySortField,
     sort_direction: SortDirection,
-    image_selection: Option<ImageSelectionRect>,
+    image_selection: Option<Rect2D>,
     image_selection_drag_start: Option<[f32; 2]>,
     image_selection_drag_mode: Option<ImageSelectionDragMode>,
 }
@@ -218,11 +197,11 @@ impl ViewerState {
         self.image_view_mode = mode;
     }
 
-    pub fn image_selection(&self) -> Option<ImageSelectionRect> {
+    pub fn image_selection(&self) -> Option<Rect2D> {
         self.image_selection
     }
 
-    pub fn set_image_selection(&mut self, selection: Option<ImageSelectionRect>) {
+    pub fn set_image_selection(&mut self, selection: Option<Rect2D>) {
         self.image_selection = selection;
     }
 

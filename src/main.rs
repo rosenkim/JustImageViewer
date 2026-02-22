@@ -3,6 +3,7 @@
 mod app;
 mod core;
 mod infra;
+mod math;
 mod render;
 mod ui;
 
