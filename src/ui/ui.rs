@@ -170,12 +170,6 @@ pub fn render_ui(
                         .flags(imgui::WindowFlags::HORIZONTAL_SCROLLBAR)
                         .build(|| {
                             if let Some(texture) = current_texture {
-                                let view_panel_min = ui.cursor_screen_pos();
-                                let view_panel_size = ui.content_region_avail();
-                                let view_panel_max = [
-                                    view_panel_min[0] + view_panel_size[0],
-                                    view_panel_min[1] + view_panel_size[1],
-                                ];
                                 let avail = ui.content_region_avail();
                                 let width_scale = avail[0] / texture.width as f32;
                                 let height_scale = avail[1] / texture.height as f32;
@@ -196,7 +190,15 @@ pub fn render_ui(
                                     cursor[0] + centered[0],
                                     cursor[1] + centered[1],
                                 ]);
+
                                 imgui::Image::new(texture.id, display_size).build(ui);
+
+                                let view_panel_min = ui.window_pos();
+                                let view_panel_max = [
+                                    view_panel_min[0] + ui.window_size()[0],
+                                    view_panel_min[1] + ui.window_size()[1],
+                                ];
+
                                 render_image_selection_widget(
                                     ui,
                                     app_state,

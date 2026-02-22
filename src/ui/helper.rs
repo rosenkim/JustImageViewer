@@ -1,6 +1,4 @@
-use crate::app::{
-    ImageSelectionDragMode, ImageSelectionResizeHandle, ViewerState,
-};
+use crate::app::{ImageSelectionDragMode, ImageSelectionResizeHandle, ViewerState};
 use crate::math::{Point2D, Rect2D};
 use imgui::{ImColor32, Key, MouseButton, MouseCursor, Ui};
 
@@ -60,7 +58,8 @@ pub fn render_image_selection_widget(
     };
     let cursor_handle = active_resize_handle.or(hovered_resize_handle);
     if let Some(handle) = cursor_handle {
-        ui.set_mouse_cursor(Some(cursor_for_resize_handle(handle)));
+        let cursor_type = cursor_for_resize_handle(handle);
+        ui.set_mouse_cursor(Some(cursor_type));
     }
 
     if is_hovering_view_panel && ui.is_mouse_clicked(MouseButton::Left) {
@@ -248,48 +247,31 @@ fn resolve_resize_handle(
     image_display_size: [f32; 2],
     image_pixel_size: [f32; 2],
 ) -> Option<ImageSelectionResizeHandle> {
-    // Hit-test the mouse against the selection edges/corners
-    let selection_screen_min = image_to_screen(
-        selection.min,
-        image_screen_min,
-        image_display_size,
-        image_pixel_size,
-    );
-    let selection_screen_max = image_to_screen(
-        selection.max,
-        image_screen_min,
-        image_display_size,
-        image_pixel_size,
-    );
+    // Hit-test entirely in screen space to avoid scale-dependent issues
+    let sel_screen_min = image_to_screen(selection.min, image_screen_min, image_display_size, image_pixel_size);
+    let sel_screen_max = image_to_screen(selection.max, image_screen_min, image_display_size, image_pixel_size);
     let padding = SELECTION_RESIZE_HIT_PADDING;
-    let in_expanded_bounds = mouse_screen.x >= selection_screen_min.x - padding
-        && mouse_screen.x <= selection_screen_max.x + padding
-        && mouse_screen.y >= selection_screen_min.y - padding
-        && mouse_screen.y <= selection_screen_max.y + padding;
-    if !in_expanded_bounds {
-        return None;
-    }
 
-    let near_left = (mouse_screen.x - selection_screen_min.x).abs() <= padding;
-    let near_right = (mouse_screen.x - selection_screen_max.x).abs() <= padding;
-    let near_top = (mouse_screen.y - selection_screen_min.y).abs() <= padding;
-    let near_bottom = (mouse_screen.y - selection_screen_max.y).abs() <= padding;
+    let near_left = (mouse_screen.x - sel_screen_min.x).abs() <= padding;
+    let near_right = (mouse_screen.x - sel_screen_max.x).abs() <= padding;
+    let near_top = (mouse_screen.y - sel_screen_min.y).abs() <= padding;
+    let near_bottom = (mouse_screen.y - sel_screen_max.y).abs() <= padding;
 
     if near_left && near_top {
         return Some(ImageSelectionResizeHandle::TopLeft);
-    }else if near_right && near_top {
+    } else if near_right && near_top {
         return Some(ImageSelectionResizeHandle::TopRight);
-    }else if near_left && near_bottom {
+    } else if near_left && near_bottom {
         return Some(ImageSelectionResizeHandle::BottomLeft);
-    }else if near_right && near_bottom {
+    } else if near_right && near_bottom {
         return Some(ImageSelectionResizeHandle::BottomRight);
-    }else if near_left {
+    } else if near_left {
         return Some(ImageSelectionResizeHandle::Left);
-    }else if near_right {
+    } else if near_right {
         return Some(ImageSelectionResizeHandle::Right);
-    }else if near_top {
+    } else if near_top {
         return Some(ImageSelectionResizeHandle::Top);
-    }else if near_bottom {
+    } else if near_bottom {
         return Some(ImageSelectionResizeHandle::Bottom);
     }
     None
@@ -327,40 +309,39 @@ fn resize_selection(
 
     match handle {
         ImageSelectionResizeHandle::Left => {
-            min.x = (original.min.x + delta_x).clamp(0.0, original.max.x - MIN_SELECTION_SIZE);
+            min.x = (original.min.x + delta_x);
         }
         ImageSelectionResizeHandle::Right => {
-            max.x = (original.max.x + delta_x)
-                .clamp(original.min.x + MIN_SELECTION_SIZE, image_pixel_size[0]);
+            max.x = (original.max.x + delta_x);
         }
         ImageSelectionResizeHandle::Top => {
-            min.y = (original.min.y + delta_y).clamp(0.0, original.max.y - MIN_SELECTION_SIZE);
+            min.y = (original.min.y + delta_y);
         }
         ImageSelectionResizeHandle::Bottom => {
-            max.y = (original.max.y + delta_y)
-                .clamp(original.min.y + MIN_SELECTION_SIZE, image_pixel_size[1]);
+            max.y = (original.max.y + delta_y);
         }
         ImageSelectionResizeHandle::TopLeft => {
-            min.x = (original.min.x + delta_x).clamp(0.0, original.max.x - MIN_SELECTION_SIZE);
-            min.y = (original.min.y + delta_y).clamp(0.0, original.max.y - MIN_SELECTION_SIZE);
+            min.x = (original.min.x + delta_x);
+            min.y = (original.min.y + delta_y);
         }
         ImageSelectionResizeHandle::TopRight => {
-            max.x = (original.max.x + delta_x)
-                .clamp(original.min.x + MIN_SELECTION_SIZE, image_pixel_size[0]);
-            min.y = (original.min.y + delta_y).clamp(0.0, original.max.y - MIN_SELECTION_SIZE);
+            max.x = (original.max.x + delta_x);
+            min.y = (original.min.y + delta_y);
         }
         ImageSelectionResizeHandle::BottomLeft => {
-            min.x = (original.min.x + delta_x).clamp(0.0, original.max.x - MIN_SELECTION_SIZE);
-            max.y = (original.max.y + delta_y)
-                .clamp(original.min.y + MIN_SELECTION_SIZE, image_pixel_size[1]);
+            min.x = (original.min.x + delta_x);
+            max.y = (original.max.y + delta_y);
         }
         ImageSelectionResizeHandle::BottomRight => {
-            max.x = (original.max.x + delta_x)
-                .clamp(original.min.x + MIN_SELECTION_SIZE, image_pixel_size[0]);
-            max.y = (original.max.y + delta_y)
-                .clamp(original.min.y + MIN_SELECTION_SIZE, image_pixel_size[1]);
+            max.x = (original.max.x + delta_x);
+            max.y = (original.max.y + delta_y);
         }
     }
+
+    min.x = min.x.clamp(0.0, image_pixel_size[0]);
+    min.y = min.y.clamp(0.0, image_pixel_size[1]);
+    max.x = max.x.clamp(0.0, image_pixel_size[0]);
+    max.y = max.y.clamp(0.0, image_pixel_size[1]);
 
     Rect2D { min, max }
 }
