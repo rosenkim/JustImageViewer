@@ -171,10 +171,11 @@ pub fn render_ui(
                         .build(|| {
                             if let Some(texture) = current_texture {
                                 let avail = ui.content_region_avail();
+                                let fb_scale = ui.io().display_framebuffer_scale[0];
                                 let width_scale = avail[0] / texture.width as f32;
                                 let height_scale = avail[1] / texture.height as f32;
                                 let scale = match app_state.image_view_mode() {
-                                    ImageViewMode::Original => 1.0,
+                                    ImageViewMode::Original => 1.0 / fb_scale,
                                     ImageViewMode::FitToWindow => width_scale.min(height_scale),
                                     ImageViewMode::FitToWidth => width_scale,
                                 }
