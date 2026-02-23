@@ -188,15 +188,15 @@ pub fn render_ui(
                                     (avail[1] - display_size[1]).max(0.0) * 0.5,
                                 ];
                                 ui.set_cursor_pos([
-                                    cursor[0] + centered[0],
-                                    cursor[1] + centered[1],
+                                    (cursor[0] + centered[0]).floor(),
+                                    (cursor[1] + centered[1]).floor(),
                                 ]);
 
                                 let texel_width: f32 = 1.0 / texture.tex_width as f32;
                                 let texel_height: f32 = 1.0 / texture.tex_height as f32;
 
-                                let offset_x: f32 = 0.0;
-                                let offset_y: f32 = 0.0;
+                                let offset_x: f32 = -0.5 * texel_width;
+                                let offset_y: f32 = -0.5 * texel_height;
                                 let uv0 = [0.0 + offset_x, 0.0 + offset_y];
                                 let uv1 = [
                                     (texture.width as f32 * texel_width) + offset_x,
