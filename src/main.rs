@@ -15,7 +15,8 @@ use imgui_winit_support::{HiDpiMode, WinitPlatform};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use wgpu::{CompositeAlphaMode, Device, Queue, Surface, SurfaceConfiguration, SurfaceError};
+use wgpu::{CompositeAlphaMode, Queue, Surface, SurfaceConfiguration, SurfaceError};
+use wgpu::{Instance, InstanceDescriptor, Backends, Device};
 use winit::{
     dpi::LogicalSize,
     event::{ElementState, Event, WindowEvent},
@@ -68,6 +69,26 @@ fn parse_args() -> anyhow::Result<AppArgs> {
     Ok(args)
 }
 
+/// On Windows, prefer DX12 first -> fallback to automatic(ALL) if failed
+fn make_instance() -> wgpu::Instance {
+    if cfg!(target_os = "windows") {
+        // 1) Try to specify the preferred backend first
+        let windows_instance = Instance::new(&InstanceDescriptor {
+            backends: Backends::DX12,
+            ..Default::default()
+        });
+        // Note: Instance creation itself is not usually a failure, but
+        // actual failures often occur when requesting adapters/devices.
+        windows_instance
+    } else {
+        // Non-Windows: default(automatic)
+        Instance::new(&InstanceDescriptor {
+            backends: Backends::all(),
+            ..Default::default()
+        })
+    }
+}
+
 /// App entrypoint: setup systems, run UI loop, then save config.
 fn main() -> anyhow::Result<()> {
     let args = parse_args().context("failed to parse command line arguments")?;
@@ -103,8 +124,8 @@ fn main() -> anyhow::Result<()> {
             .context("failed to create window")?,
     );
 
-    // let instance = make_instance();
-    let instance = wgpu::Instance::default();
+    let instance = make_instance();
+    // let instance = wgpu::Instance::default();
     let surface = instance
         .create_surface(window.clone())
         .context("failed to create wgpu surface")?;
@@ -278,22 +299,29 @@ fn main() -> anyhow::Result<()> {
     let mut next_redraw_at = Instant::now();
 
     let _instance = instance;
+    // Main event loop: handle OS/window events and drive rendering.
     event_loop
         .run(move |event, window_target| {
+            // Let ImGui/winit helper see every event (mouse, keyboard, etc.).
             platform.handle_event(imgui.io_mut(), window.as_ref(), &event);
 
             match event {
+                // New batch of events from OS just started.
                 Event::NewEvents(_) => {
                     let now = Instant::now();
+                    // Update delta time for ImGui (time between frames).
                     imgui.io_mut().update_delta_time(now - last_frame);
                     last_frame = now;
                 }
+                // Event loop is about to sleep; good place to decide when to wake up.
                 Event::AboutToWait => {
                     let now = Instant::now();
+                    // If it is not time to redraw yet, sleep until next_redraw_at.
                     if now < next_redraw_at {
                         window_target.set_control_flow(ControlFlow::WaitUntil(next_redraw_at));
                         return;
                     }
+                    // Choose slower FPS when window is unfocused to save resources.
                     let frame_interval = if is_window_focused {
                         focused_frame_interval
                     } else {
@@ -302,6 +330,7 @@ fn main() -> anyhow::Result<()> {
                     next_redraw_at = now + frame_interval;
                     window_target.set_control_flow(ControlFlow::WaitUntil(next_redraw_at));
 
+                    // Reload current image/texture if someone requested it.
                     if app_state.take_reload_request() {
                         current_texture = refresh_current_texture(
                             &mut app_state,
@@ -311,12 +340,15 @@ fn main() -> anyhow::Result<()> {
                         );
                     }
 
+                    // Prepare ImGui frame (may fail if window is minimized, etc.).
                     if let Err(err) = platform.prepare_frame(imgui.io_mut(), window.as_ref()) {
                         log::error!("prepare_frame failed: {err}");
                         return;
                     }
+                    // Ask OS to trigger a redraw event.
                     window.request_redraw();
                 }
+                // Handle actual drawing when the window says it needs a redraw.
                 Event::WindowEvent {
                     event: WindowEvent::RedrawRequested,
                     window_id,
@@ -345,10 +377,12 @@ fn main() -> anyhow::Result<()> {
                         }
                     };
 
+                    // Create view into the current frame's texture.
                     let view = frame
                         .texture
                         .create_view(&wgpu::TextureViewDescriptor::default());
 
+                    // Build ImGui UI for this frame.
                     let ui = imgui.frame();
                     let mut running = true;
                     render_ui(ui, &mut app_state, current_texture, &mut running);
@@ -360,7 +394,9 @@ fn main() -> anyhow::Result<()> {
                         return;
                     }
 
+                    // Tell ImGui/winit helper we are ready to render.
                     platform.prepare_render(ui, window.as_ref());
+                    // Get draw lists from ImGui.
                     let draw_data = imgui.render();
 
                     let mut encoder =
@@ -369,6 +405,7 @@ fn main() -> anyhow::Result<()> {
                         });
 
                     {
+                        // Begin a render pass to clear screen and draw ImGui.
                         let mut rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                             label: Some("image-viewer render pass"),
                             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -389,44 +426,55 @@ fn main() -> anyhow::Result<()> {
                             timestamp_writes: None,
                         });
 
+                        // Render ImGui draw commands into the current frame.
                         if let Err(err) = renderer.render(draw_data, &queue, &device, &mut rpass) {
                             log::error!("imgui render failed: {err}");
                         }
                     }
 
+                    // Submit GPU commands and present the frame to the screen.
                     queue.submit(Some(encoder.finish()));
                     frame.present();
                 }
+                // Other window events for our window (close, resize, keyboard, etc.).
                 Event::WindowEvent { window_id, event } if window_id == window.id() => {
                     match event {
+                        // User clicked close button or OS asked us to close.
                         WindowEvent::CloseRequested => {
                             save_config_on_exit(&app_state);
                             image_manager.destroy(&mut renderer);
                             window_target.exit();
                         }
+                        // User dropped a file onto the window.
                         WindowEvent::DroppedFile(path) => {
                             app_state.handle_drop_path(path.as_path());
                         }
+                        // Modifier keys (Ctrl, Shift, Alt, Super) state changed.
                         WindowEvent::ModifiersChanged(new_modifiers) => {
                             modifiers = new_modifiers.state();
                         }
+                        // Handle key presses (no auto-repeat).
                         WindowEvent::KeyboardInput { event, .. }
                             if event.state == ElementState::Pressed && !event.repeat =>
                         {
                             match event.physical_key {
+                                // ESC clears current image selection.
                                 PhysicalKey::Code(KeyCode::Escape) => {
                                     app_state.clear_image_selection_state();
                                 }
+                                // Ctrl+O or Cmd+O opens directory dialog.
                                 PhysicalKey::Code(KeyCode::KeyO)
                                     if modifiers.control_key() || modifiers.super_key() =>
                                 {
                                     app_state.open_directory_dialog();
                                 }
+                                // Arrow/PageDown: go to next image.
                                 PhysicalKey::Code(KeyCode::ArrowRight)
                                 | PhysicalKey::Code(KeyCode::ArrowDown)
                                 | PhysicalKey::Code(KeyCode::PageDown) => {
                                     app_state.advance_selection(1);
                                 }
+                                // Arrow/PageUp: go to previous image.
                                 PhysicalKey::Code(KeyCode::ArrowLeft)
                                 | PhysicalKey::Code(KeyCode::ArrowUp)
                                 | PhysicalKey::Code(KeyCode::PageUp) => {
@@ -435,6 +483,7 @@ fn main() -> anyhow::Result<()> {
                                 _ => {}
                             }
                         }
+                        // Window size changed (user resized or system DPI change, etc.).
                         WindowEvent::Resized(new_size) => {
                             if new_size.width > 0 && new_size.height > 0 {
                                 surface_config.width = new_size.width;
@@ -442,8 +491,10 @@ fn main() -> anyhow::Result<()> {
                                 surface.configure(&device, &surface_config);
                             }
                         }
+                        // Monitor scale factor (DPI) changed.
                         WindowEvent::ScaleFactorChanged { scale_factor, .. } => {
                             if scale_factor > 0.0 {
+                                // Keep ImGui UI size visually similar after DPI change.
                                 imgui.io_mut().font_global_scale = 1.0 / scale_factor as f32;
                             }
                             let new_size = window.inner_size();
@@ -453,10 +504,13 @@ fn main() -> anyhow::Result<()> {
                                 surface.configure(&device, &surface_config);
                             }
                         }
+                        // Window focus gained or lost.
                         WindowEvent::Focused(focused) => {
                             is_window_focused = focused;
+                            // Reset next redraw time so we update immediately.
                             next_redraw_at = Instant::now();
                             if focused {
+                                // When refocused, request an immediate redraw.
                                 window.request_redraw();
                             }
                         }
