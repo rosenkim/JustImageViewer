@@ -21,10 +21,6 @@ const SELECTION_POPUP_ITEMS: &[SelectionPopupItem] = &[
         name: "Copy",
         action: copy_selected_region,
     },
-    SelectionPopupItem {
-        name: "Cut",
-        action: cut_selected_region,
-    },
 ];
 
 pub fn render_image_selection_widget(
@@ -483,8 +479,4 @@ fn render_selection_popup(ui: &Ui, app_state: &mut ViewerState) {
 
 fn copy_selected_region(_app_state: &mut ViewerState) {
     // TODO: implement selected region copy.
-}
-
-fn cut_selected_region(_app_state: &mut ViewerState) {
-    // TODO: implement selected region cut.
 }

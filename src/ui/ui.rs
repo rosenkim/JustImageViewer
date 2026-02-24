@@ -195,12 +195,10 @@ pub fn render_ui(
                                 let texel_width: f32 = 1.0 / texture.tex_width as f32;
                                 let texel_height: f32 = 1.0 / texture.tex_height as f32;
 
-                                let offset_x: f32 = -0.5 * texel_width;
-                                let offset_y: f32 = -0.5 * texel_height;
-                                let uv0 = [0.0 + offset_x, 0.0 + offset_y];
+                                let uv0 = [0.0, 0.0];
                                 let uv1 = [
-                                    (texture.width as f32 * texel_width) + offset_x,
-                                    (texture.height as f32 * texel_height) + offset_y,
+                                    (texture.width as f32 * texel_width),
+                                    (texture.height as f32 * texel_height),
                                 ];
 
                                 imgui::Image::new(texture.id, display_size)

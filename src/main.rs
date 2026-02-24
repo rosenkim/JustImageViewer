@@ -15,14 +15,14 @@ use imgui_winit_support::{HiDpiMode, WinitPlatform};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
+use wgpu::{Backends, Device, Instance, InstanceDescriptor};
 use wgpu::{CompositeAlphaMode, Queue, Surface, SurfaceConfiguration, SurfaceError};
-use wgpu::{Instance, InstanceDescriptor, Backends, Device};
 use winit::{
     dpi::LogicalSize,
     event::{ElementState, Event, WindowEvent},
     event_loop::{ControlFlow, EventLoop},
     keyboard::{KeyCode, ModifiersState, PhysicalKey},
-    window::WindowBuilder,
+    window::{Icon, WindowBuilder},
 };
 
 use crate::render::image_manager::{DisplayImage, ImageManager};
@@ -114,9 +114,16 @@ fn main() -> anyhow::Result<()> {
     }
 
     let event_loop = EventLoop::new().map_err(anyhow::Error::msg)?;
+
+    let icon = load_window_icon();
+    if icon.is_none() {
+        log::warn!("Failed to load window icon");
+    }
+
     let window = Arc::new(
         WindowBuilder::new()
             .with_title("Vibe Image Viewer")
+            .with_window_icon(icon)
             .with_inner_size(LogicalSize::new(1280.0, 800.0))
             .with_resizable(true)
             .build(&event_loop)
@@ -137,7 +144,6 @@ fn main() -> anyhow::Result<()> {
     }))
     .context("failed to request wgpu adapter")?;
 
-    // 혹은 성능 위주라면 어댑터의 값을 그대로 사용합니다.
     let adapter_limits = adapter.limits();
 
     let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
@@ -274,15 +280,20 @@ fn main() -> anyhow::Result<()> {
     let mut max_cache_size = app_state.config().texture_cache_max_entries;
     if max_cache_size == 0 {
         log::warn!(
-            "Invalid texture_cache_max_entries ({}). Falling back to 20",
+            "Invalid texture_cache_max_entries ({}). Falling back to 16",
             max_cache_size
         );
-        max_cache_size = 20;
+        max_cache_size = 16;
     }
 
     let max_texture_size = device.limits().max_texture_dimension_2d;
-    let mut image_manager =
-        ImageManager::init(max_texture_size, max_cache_size, &device, &queue, &mut renderer);
+    let mut image_manager = ImageManager::init(
+        max_texture_size,
+        max_cache_size,
+        &device,
+        &queue,
+        &mut renderer,
+    );
     log::info!(
         "ImageManager created with max_texture_size: {}, max_cache_size: {}",
         max_texture_size,
@@ -388,6 +399,7 @@ fn main() -> anyhow::Result<()> {
                     render_ui(ui, &mut app_state, current_texture, &mut running);
 
                     if !running {
+                        // exit
                         save_config_on_exit(&app_state);
                         image_manager.destroy(&mut renderer);
                         window_target.exit();
@@ -441,6 +453,8 @@ fn main() -> anyhow::Result<()> {
                     match event {
                         // User clicked close button or OS asked us to close.
                         WindowEvent::CloseRequested => {
+                            log::info!("CloseRequested");
+                            // exit
                             save_config_on_exit(&app_state);
                             image_manager.destroy(&mut renderer);
                             window_target.exit();
@@ -613,4 +627,13 @@ fn refresh_current_texture(
             None
         }
     }
+}
+
+fn load_window_icon() -> Option<Icon> {
+    // 런타임 파일로 로드해도 되고, 배포 편하게 include_bytes!로 박아도 됨.
+    let bytes = include_bytes!("../assets/icon.png");
+
+    let img = image::load_from_memory(bytes).ok()?.into_rgba8();
+    let (w, h) = img.dimensions();
+    Icon::from_rgba(img.into_raw(), w, h).ok()
 }

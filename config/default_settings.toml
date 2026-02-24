@@ -13,7 +13,7 @@ ui_scale_factor = 1.0
 
 [texture]
 # Maximum number of cached textures
-texture_cache_max_entries = 20
+texture_cache_max_entries = 16
 
 [background_style]
 # mode can be "checker" or "solid"

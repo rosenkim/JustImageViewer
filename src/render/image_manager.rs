@@ -63,8 +63,8 @@ impl ImageManager {
                 format: Some(TextureFormat::Rgba8UnormSrgb),
                 mip_level_count: 1,
                 sampler_desc: wgpu::SamplerDescriptor {
-                    mag_filter: wgpu::FilterMode::Linear,
-                    min_filter: wgpu::FilterMode::Linear,
+                    mag_filter: wgpu::FilterMode::Nearest,
+                    min_filter: wgpu::FilterMode::Nearest,
                     mipmap_filter: wgpu::FilterMode::Nearest,
                     ..wgpu::SamplerDescriptor::default()
                 },
