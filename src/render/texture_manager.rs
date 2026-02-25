@@ -11,7 +11,6 @@ use wgpu::{Device, Extent3d, Queue, TextureFormat};
 
 use crate::core::image_loader::DecodedImage;
 
-#[derive(Clone)]
 pub struct UploadedTexture {
     pub id: TextureId,
     pub width: usize,
@@ -61,7 +60,7 @@ impl TextureManager {
                 id: existing.texture_id,
                 width: existing.width,
                 height: existing.height,
-                pixels: existing.pixels.clone(),
+                pixels: Arc::clone(&existing.pixels),
             });
         }
 
@@ -111,13 +110,12 @@ impl TextureManager {
 
         self.evict_if_full(renderer);
 
-        let pixels = Arc::<[u8]>::from(decoded.pixels.clone());
         self.access_counter += 1;
         let record = TextureRecord {
             texture_id,
             width: decoded.width,
             height: decoded.height,
-            pixels: pixels.clone(),
+            pixels: Arc::clone(&decoded.pixels),
             last_used: self.access_counter,
         };
 
@@ -127,7 +125,7 @@ impl TextureManager {
             id: texture_id,
             width: decoded.width,
             height: decoded.height,
-            pixels,
+            pixels: Arc::clone(&decoded.pixels),
         })
     }
 

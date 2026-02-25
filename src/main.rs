@@ -105,7 +105,7 @@ fn main() -> anyhow::Result<()> {
     log::info!("Loaded configuration from {}", config_handle.path.display());
 
     let mut app_state = ViewerState::new(config_handle.path, config_handle.settings);
-    if let Some(open_path) = args.open_path.clone() {
+    if let Some(open_path) = args.open_path {
         app_state
             .open_path_argument(open_path)
             .context("failed to open PATH argument")?;
@@ -392,7 +392,8 @@ fn main() -> anyhow::Result<()> {
                     // Build ImGui UI for this frame.
                     let ui = imgui.frame();
                     let mut running = true;
-                    render_ui(ui, &mut app_state, current_texture, &mut running);
+                    // Clone to avoid moving out of the closure-captured option.
+                    render_ui(ui, &mut app_state, current_texture.as_ref(), &mut running);
 
                     if !running {
                         // exit

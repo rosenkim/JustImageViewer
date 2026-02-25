@@ -19,7 +19,7 @@ const MIN_SELECTION_SIZE: f32 = 1.0;
 pub fn render_ui(
     ui: &imgui::Ui,
     app_state: &mut ViewerState,
-    current_texture: Option<UploadedTexture>,
+    current_texture: Option<&UploadedTexture>,
     running: &mut bool,
 ) {
     render_main_menu_bar(ui, app_state, running);

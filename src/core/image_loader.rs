@@ -1,4 +1,5 @@
 use std::path::Path;
+use std::sync::Arc;
 
 use anyhow::{Context, Result};
 
@@ -8,7 +9,7 @@ use crate::core::media::MediaFormat;
 pub struct DecodedImage {
     pub width: usize,
     pub height: usize,
-    pub pixels: Vec<u8>,
+    pub pixels: Arc<[u8]>,
 }
 
 pub fn load_image_rgba(path: &Path) -> Result<DecodedImage> {
@@ -24,7 +25,7 @@ pub fn load_image_rgba(path: &Path) -> Result<DecodedImage> {
 
     let rgba_image = dyn_image.to_rgba8();
     let (width, height) = rgba_image.dimensions();
-    let pixels = rgba_image.into_raw();
+    let pixels = Arc::<[u8]>::from(rgba_image.into_raw());
 
     Ok(DecodedImage {
         width: width as usize,
