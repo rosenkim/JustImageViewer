@@ -25,7 +25,7 @@ use winit::{
     window::{Icon, WindowBuilder},
 };
 
-use crate::render::image_manager::{DisplayImage, ImageManager};
+use crate::render::texture_manager::{TextureManager, UploadedTexture};
 use crate::ui::render_ui;
 
 const FOCUSED_FPS: u32 = 60;
@@ -287,20 +287,15 @@ fn main() -> anyhow::Result<()> {
     }
 
     let max_texture_size = device.limits().max_texture_dimension_2d;
-    let mut image_manager = ImageManager::init(
-        max_texture_size,
-        max_cache_size,
-        &device,
-        &queue,
-        &mut renderer,
-    );
+    let mut texture_manager = TextureManager::new(max_texture_size, max_cache_size);
+
     log::info!(
         "ImageManager created with max_texture_size: {}, max_cache_size: {}",
         max_texture_size,
         max_cache_size
     );
 
-    let mut current_texture: Option<DisplayImage> = None;
+    let mut current_texture: Option<UploadedTexture> = None;
 
     let mut last_frame = Instant::now();
     let mut modifiers = ModifiersState::default();
@@ -345,9 +340,10 @@ fn main() -> anyhow::Result<()> {
                     if app_state.take_reload_request() {
                         current_texture = refresh_current_texture(
                             &mut app_state,
+                            &device,
                             &queue,
                             &mut renderer,
-                            &mut image_manager,
+                            &mut texture_manager,
                         );
                     }
 
@@ -373,7 +369,7 @@ fn main() -> anyhow::Result<()> {
                         Err(SurfaceError::OutOfMemory) => {
                             log::error!("Surface out of memory; exiting");
                             save_config_on_exit(&app_state);
-                            image_manager.destroy(&mut renderer);
+                            texture_manager.clear(&mut renderer);
                             window_target.exit();
                             return;
                         }
@@ -401,7 +397,7 @@ fn main() -> anyhow::Result<()> {
                     if !running {
                         // exit
                         save_config_on_exit(&app_state);
-                        image_manager.destroy(&mut renderer);
+                        texture_manager.clear(&mut renderer);
                         window_target.exit();
                         return;
                     }
@@ -456,7 +452,7 @@ fn main() -> anyhow::Result<()> {
                             log::info!("CloseRequested");
                             // exit
                             save_config_on_exit(&app_state);
-                            image_manager.destroy(&mut renderer);
+                            texture_manager.clear(&mut renderer);
                             window_target.exit();
                         }
                         // User dropped a file onto the window.
@@ -605,10 +601,11 @@ fn restore_last_directory_if_needed(app_state: &mut ViewerState) {
 /// Decode selected image and make sure we have a usable GPU texture.
 fn refresh_current_texture(
     app_state: &mut ViewerState,
+    device: &Device,
     queue: &Queue,
     renderer: &mut imgui_wgpu::Renderer,
-    image_manager: &mut ImageManager,
-) -> Option<DisplayImage> {
+    texture_manager: &mut TextureManager,
+) -> Option<UploadedTexture> {
     let decoded = match app_state.load_current_image_rgba() {
         Ok(Some(decoded)) => decoded,
         Ok(None) => return None,
@@ -616,7 +613,7 @@ fn refresh_current_texture(
     };
 
     let entry = app_state.current_entry()?;
-    match image_manager.load(&entry.path, decoded, queue, renderer) {
+    match texture_manager.get_or_upload(&entry.path, &decoded, device, queue, renderer) {
         Ok(uploaded) => Some(uploaded),
         Err(err) => {
             log::error!(
@@ -628,6 +625,7 @@ fn refresh_current_texture(
         }
     }
 }
+
 
 fn load_window_icon() -> Option<Icon> {
     // 런타임 파일로 로드해도 되고, 배포 편하게 include_bytes!로 박아도 됨.
