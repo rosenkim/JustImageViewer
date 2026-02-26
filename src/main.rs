@@ -25,6 +25,7 @@ use winit::{
     window::{Icon, WindowBuilder},
 };
 
+use crate::render::app_resources::AppResources;
 use crate::render::texture_manager::{TextureManager, UploadedTexture};
 use crate::ui::render_ui;
 
@@ -276,6 +277,8 @@ fn main() -> anyhow::Result<()> {
         ..RendererConfig::default()
     };
     let mut renderer = imgui_wgpu::Renderer::new(&mut imgui, &device, &queue, renderer_config);
+    let mut app_resources = AppResources::new(&device, &queue, &mut renderer)
+        .context("failed to initialize global app resources")?;
 
     let mut max_cache_size = app_state.config().texture_cache_max_entries;
     if max_cache_size == 0 {
@@ -368,8 +371,12 @@ fn main() -> anyhow::Result<()> {
                         }
                         Err(SurfaceError::OutOfMemory) => {
                             log::error!("Surface out of memory; exiting");
-                            save_config_on_exit(&app_state);
-                            texture_manager.clear(&mut renderer);
+                            cleanup_on_exit(
+                                &app_state,
+                                &mut texture_manager,
+                                &mut app_resources,
+                                &mut renderer,
+                            );
                             window_target.exit();
                             return;
                         }
@@ -393,12 +400,22 @@ fn main() -> anyhow::Result<()> {
                     let ui = imgui.frame();
                     let mut running = true;
                     // Clone to avoid moving out of the closure-captured option.
-                    render_ui(ui, &mut app_state, current_texture.as_ref(), &mut running);
+                    render_ui(
+                        ui,
+                        &mut app_state,
+                        current_texture.as_ref(),
+                        &app_resources,
+                        &mut running,
+                    );
 
                     if !running {
                         // exit
-                        save_config_on_exit(&app_state);
-                        texture_manager.clear(&mut renderer);
+                        cleanup_on_exit(
+                            &app_state,
+                            &mut texture_manager,
+                            &mut app_resources,
+                            &mut renderer,
+                        );
                         window_target.exit();
                         return;
                     }
@@ -452,8 +469,12 @@ fn main() -> anyhow::Result<()> {
                         WindowEvent::CloseRequested => {
                             log::info!("CloseRequested");
                             // exit
-                            save_config_on_exit(&app_state);
-                            texture_manager.clear(&mut renderer);
+                            cleanup_on_exit(
+                                &app_state,
+                                &mut texture_manager,
+                                &mut app_resources,
+                                &mut renderer,
+                            );
                             window_target.exit();
                         }
                         // User dropped a file onto the window.
@@ -585,6 +606,17 @@ fn save_config_on_exit(app_state: &ViewerState) {
     }
 }
 
+fn cleanup_on_exit(
+    app_state: &ViewerState,
+    texture_manager: &mut TextureManager,
+    app_resources: &mut AppResources,
+    renderer: &mut imgui_wgpu::Renderer,
+) {
+    save_config_on_exit(app_state);
+    texture_manager.clear(renderer);
+    app_resources.release(renderer);
+}
+
 /// Try to restore the last directory from config.
 fn restore_last_directory_if_needed(app_state: &mut ViewerState) {
     if let Some(directory) = app_state.restore_candidate().map(PathBuf::from) {
@@ -626,7 +658,6 @@ fn refresh_current_texture(
         }
     }
 }
-
 
 fn load_window_icon() -> Option<Icon> {
     // 런타임 파일로 로드해도 되고, 배포 편하게 include_bytes!로 박아도 됨.

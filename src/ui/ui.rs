@@ -1,8 +1,7 @@
-use crate::app::{
-    ImageViewMode, LibrarySortField, SortDirection, ViewerState,
-    format_file_size,
-};
+use crate::app::{ImageViewMode, LibrarySortField, SortDirection, ViewerState, format_file_size};
+use crate::core::media::MediaEntry;
 use crate::math::{Point2D, Rect2D};
+use crate::render::app_resources::AppResources;
 use crate::render::texture_manager::UploadedTexture;
 use imgui::{Condition, MouseCursor, StyleVar, TableFlags, Ui};
 
@@ -14,12 +13,14 @@ const MIN_LIBRARY_WIDTH: f32 = 220.0;
 const MIN_VIEWER_WIDTH: f32 = 280.0;
 const LIBRARY_SORT_FIELDS: [&str; 3] = ["Name", "Date", "Size"];
 const LIBRARY_SORT_DIRECTIONS: [&str; 2] = ["Ascending", "Descending"];
+const LIBRARY_THUMBNAIL_SIZE: f32 = 80.0;
 const MIN_SELECTION_SIZE: f32 = 1.0;
 
 pub fn render_ui(
     ui: &imgui::Ui,
     app_state: &mut ViewerState,
     current_texture: Option<&UploadedTexture>,
+    app_resources: &AppResources,
     running: &mut bool,
 ) {
     render_main_menu_bar(ui, app_state, running);
@@ -115,16 +116,22 @@ pub fn render_ui(
                             };
                             app_state.set_sort_direction(direction);
                         }
+                        let mut show_thumbnail = app_state.show_thumbnail();
+                        if ui.checkbox("Thumbnail", &mut show_thumbnail) {
+                            app_state.set_show_thumbnail(show_thumbnail);
+                        }
                         ui.separator();
                         ui.child_window("library_scroll")
                             .size([0.0, -36.0])
                             .build(|| {
                                 for (index, entry) in app_state.media_items().iter().enumerate() {
-                                    if ui
-                                        .selectable_config(&entry.file_name)
-                                        .selected(app_state.current_index() == Some(index))
-                                        .build()
-                                    {
+                                    if render_library_item_row(
+                                        ui,
+                                        app_state,
+                                        app_resources,
+                                        index,
+                                        entry,
+                                    ) {
                                         clicked_index = Some(index);
                                     }
                                 }
@@ -426,6 +433,49 @@ fn render_selection_window(ui: &Ui, app_state: &mut ViewerState) {
     app_state.set_show_selection_window(open);
 }
 
+fn render_library_item_row(
+    ui: &Ui,
+    app_state: &ViewerState,
+    app_resources: &AppResources,
+    index: usize,
+    entry: &MediaEntry,
+) -> bool {
+    let current_width = app_state.library_width() - 32.0;
+    let thumbnail_size_xy = [LIBRARY_THUMBNAIL_SIZE, LIBRARY_THUMBNAIL_SIZE];
+    if app_state.show_thumbnail() {
+        let image_view_id = format!("thumbnail_image_view_{index}");
+        ui.child_window(&image_view_id)
+            .size(thumbnail_size_xy)
+            .border(false)
+            .build(|| {
+                imgui::Image::new(app_resources.empty_icon_texture_id, thumbnail_size_xy).build(ui);
+            });
+        ui.same_line();
+
+        let dimensions_text = match entry.dimensions {
+            Some((width, height)) => format!("{width} x {height}"),
+            None => "Unknown x Unknown".to_owned(),
+        };
+        // Show file name + resolution as two lines in one selectable row.
+        let selectable_label = format!(
+            "{}\n{}##library_item_{index}",
+            entry.file_name, dimensions_text
+        );
+        return ui
+            .selectable_config(&selectable_label)
+            .selected(app_state.current_index() == Some(index))
+            .size([
+                (current_width - thumbnail_size_xy[0]) as f32,
+                thumbnail_size_xy[1],
+            ])
+            .build();
+    } else {
+        ui.selectable_config(&entry.file_name)
+            .selected(app_state.current_index() == Some(index))
+            .build()
+    }
+}
+
 fn property_grid_float_row(ui: &Ui, name: &str, id: &str, value: &mut f32) -> bool {
     ui.table_next_row();
     ui.table_next_column();
@@ -435,10 +485,7 @@ fn property_grid_float_row(ui: &Ui, name: &str, id: &str, value: &mut f32) -> bo
     ui.input_float(id, value).display_format("%.1f").build()
 }
 
-fn clamp_selection_rect_to_image(
-    rect: Rect2D,
-    image_size: [f32; 2],
-) -> Rect2D {
+fn clamp_selection_rect_to_image(rect: Rect2D, image_size: [f32; 2]) -> Rect2D {
     let (min_x, max_x) = clamp_selection_axis(rect.min.x, rect.max.x, image_size[0]);
     let (min_y, max_y) = clamp_selection_axis(rect.min.y, rect.max.y, image_size[1]);
 

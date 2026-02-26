@@ -67,6 +67,7 @@ pub struct MediaEntry {
     pub format: MediaFormat,
     pub file_size: u64,
     pub modified_time: Duration,
+    pub dimensions: Option<(usize, usize)>,
 }
 
 pub fn scan_directory(root: &Path) -> Result<Vec<MediaEntry>> {
@@ -113,6 +114,10 @@ pub fn scan_directory(root: &Path) -> Result<Vec<MediaEntry>> {
             .and_then(OsStr::to_str)
             .map(|s| s.to_owned())
             .unwrap_or_else(|| path.display().to_string());
+        // Read only image header info here so UI can show resolution without full decode.
+        let dimensions = image::image_dimensions(&path)
+            .ok()
+            .map(|(width, height)| (width as usize, height as usize));
 
         entries.push(MediaEntry {
             path,
@@ -120,6 +125,7 @@ pub fn scan_directory(root: &Path) -> Result<Vec<MediaEntry>> {
             format,
             file_size,
             modified_time,
+            dimensions,
         });
     }
 

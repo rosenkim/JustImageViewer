@@ -92,6 +92,7 @@ pub struct ViewerState {
     image_view_mode: ImageViewMode,
     library_sort_field: LibrarySortField,
     sort_direction: SortDirection,
+    show_thumbnail: bool,
     image_selection: Option<Rect2D>,
     image_selection_drag_start: Option<[f32; 2]>,
     image_selection_drag_mode: Option<ImageSelectionDragMode>,
@@ -108,11 +109,13 @@ impl ViewerState {
         let image_view_mode = config.image_view_mode;
         let library_sort_field = config.library_sort_field;
         let sort_direction = config.sort_direction;
+        let show_thumbnail = config.show_thumbnail;
 
         config.library_width = library_width;
         config.image_view_mode = image_view_mode;
         config.library_sort_field = library_sort_field;
         config.sort_direction = sort_direction;
+        config.show_thumbnail = show_thumbnail;
 
         Self {
             config,
@@ -131,6 +134,7 @@ impl ViewerState {
             image_view_mode,
             library_sort_field,
             sort_direction,
+            show_thumbnail,
             image_selection: None,
             image_selection_drag_start: None,
             image_selection_drag_mode: None,
@@ -292,6 +296,15 @@ impl ViewerState {
         self.sort_media_items();
     }
 
+    pub fn show_thumbnail(&self) -> bool {
+        self.show_thumbnail
+    }
+
+    pub fn set_show_thumbnail(&mut self, show: bool) {
+        self.show_thumbnail = show;
+        self.config.show_thumbnail = show;
+    }
+
     pub fn select_index(&mut self, index: usize) {
         if index < self.media_items.len() {
             self.current_index = Some(index);
@@ -435,6 +448,10 @@ impl ViewerState {
             .and_then(OsStr::to_str)
             .map(str::to_owned)
             .unwrap_or_else(|| file_path.display().to_string());
+        // Read only image header so library list can show resolution quickly.
+        let dimensions = image::image_dimensions(&file_path)
+            .ok()
+            .map(|(width, height)| (width as usize, height as usize));
 
         self.config.last_open_directory = Some(directory.clone());
         self.current_directory = Some(directory);
@@ -444,6 +461,7 @@ impl ViewerState {
             format,
             file_size,
             modified_time,
+            dimensions,
         }];
         self.current_index = Some(0);
         self.current_image_size = None;

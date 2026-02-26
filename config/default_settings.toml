@@ -18,6 +18,7 @@ library_width = 300.0
 image_view_mode = "fit_to_window"
 library_sort_field = "name"
 sort_direction = "ascending"
+show_thumbnail = true
 
 [texture]
 # Maximum number of cached textures

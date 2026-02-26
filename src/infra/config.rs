@@ -34,6 +34,7 @@ pub struct AppConfig {
     pub image_view_mode: ImageViewMode,
     pub library_sort_field: LibrarySortField,
     pub sort_direction: SortDirection,
+    pub show_thumbnail: bool,
 }
 
 impl Default for AppConfig {
@@ -53,6 +54,7 @@ impl Default for AppConfig {
             image_view_mode: ImageViewMode::FitToWindow,
             library_sort_field: LibrarySortField::Name,
             sort_direction: SortDirection::Ascending,
+            show_thumbnail: true,
         }
     }
 }
