@@ -5,6 +5,7 @@ use std::{
 };
 
 use anyhow::{Context, bail};
+use serde::{Deserialize, Serialize};
 
 use crate::{
     core::{
@@ -16,24 +17,38 @@ use crate::{
 
 pub use crate::math::Rect2D;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
 pub enum ImageViewMode {
     Original,
+    #[default]
     FitToWindow,
     FitToWidth,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
 pub enum LibrarySortField {
+    #[default]
     Name,
     Date,
     Size,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
 pub enum SortDirection {
+    #[default]
     Ascending,
     Descending,
+}
+
+fn normalize_library_width(width: f32) -> f32 {
+    if width.is_finite() && width > 0.0 {
+        width
+    } else {
+        300.0
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -84,25 +99,38 @@ pub struct ViewerState {
 
 impl ViewerState {
     /// Create app state with config and default UI state.
-    pub fn new(config_path: PathBuf, config: AppConfig) -> Self {
+    pub fn new(config_path: PathBuf, mut config: AppConfig) -> Self {
         let status_message = format!("Ready - configuration at {}", config_path.display());
+        let show_library = config.show_library;
+        let show_info = config.show_info;
+        let show_selection_window = config.show_selection_window;
+        let library_width = normalize_library_width(config.library_width);
+        let image_view_mode = config.image_view_mode;
+        let library_sort_field = config.library_sort_field;
+        let sort_direction = config.sort_direction;
+
+        config.library_width = library_width;
+        config.image_view_mode = image_view_mode;
+        config.library_sort_field = library_sort_field;
+        config.sort_direction = sort_direction;
+
         Self {
             config,
             config_path,
             status_message,
-            show_library: true,
-            show_info: true,
+            show_library,
+            show_info,
             show_keyboard_shortcuts: false,
-            show_selection_window: false,
+            show_selection_window,
             current_directory: None,
             media_items: Vec::new(),
             current_index: None,
             current_image_size: None,
             needs_image_reload: false,
-            library_width: 300.0,
-            image_view_mode: ImageViewMode::FitToWindow,
-            library_sort_field: LibrarySortField::Name,
-            sort_direction: SortDirection::Ascending,
+            library_width,
+            image_view_mode,
+            library_sort_field,
+            sort_direction,
             image_selection: None,
             image_selection_drag_start: None,
             image_selection_drag_mode: None,
@@ -119,6 +147,7 @@ impl ViewerState {
 
     pub fn set_show_library(&mut self, show: bool) {
         self.show_library = show;
+        self.config.show_library = show;
     }
 
     pub fn show_info(&self) -> bool {
@@ -127,6 +156,7 @@ impl ViewerState {
 
     pub fn set_show_info(&mut self, show: bool) {
         self.show_info = show;
+        self.config.show_info = show;
     }
 
     pub fn show_keyboard_shortcuts(&self) -> bool {
@@ -143,6 +173,7 @@ impl ViewerState {
 
     pub fn set_show_selection_window(&mut self, show: bool) {
         self.show_selection_window = show;
+        self.config.show_selection_window = show;
     }
 
     pub fn config_path(&self) -> &Path {
@@ -189,7 +220,9 @@ impl ViewerState {
     }
 
     pub fn set_library_width(&mut self, width: f32) {
-        self.library_width = width;
+        let normalized = normalize_library_width(width);
+        self.library_width = normalized;
+        self.config.library_width = normalized;
     }
 
     pub fn image_view_mode(&self) -> ImageViewMode {
@@ -198,6 +231,7 @@ impl ViewerState {
 
     pub fn set_image_view_mode(&mut self, mode: ImageViewMode) {
         self.image_view_mode = mode;
+        self.config.image_view_mode = mode;
     }
 
     pub fn image_selection(&self) -> Option<Rect2D> {
@@ -237,6 +271,7 @@ impl ViewerState {
     }
 
     pub fn set_library_sort_field(&mut self, field: LibrarySortField) {
+        self.config.library_sort_field = field;
         if self.library_sort_field == field {
             return;
         }
@@ -249,6 +284,7 @@ impl ViewerState {
     }
 
     pub fn set_sort_direction(&mut self, direction: SortDirection) {
+        self.config.sort_direction = direction;
         if self.sort_direction == direction {
             return;
         }

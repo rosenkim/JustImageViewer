@@ -7,6 +7,8 @@ use anyhow::{Context, Result};
 use directories::BaseDirs;
 use serde::{Deserialize, Serialize};
 
+use crate::app::{ImageViewMode, LibrarySortField, SortDirection};
+
 const QUALIFIER: &str = "dev";
 const ORGANIZATION: &str = "Vibe";
 const APPLICATION: &str = "ImageViewer";
@@ -25,6 +27,13 @@ pub struct AppConfig {
     pub background_style: BackgroundStyle,
     #[serde(alias = "max_cache_size")]
     pub texture_cache_max_entries: usize,
+    pub show_library: bool,
+    pub show_info: bool,
+    pub show_selection_window: bool,
+    pub library_width: f32,
+    pub image_view_mode: ImageViewMode,
+    pub library_sort_field: LibrarySortField,
+    pub sort_direction: SortDirection,
 }
 
 impl Default for AppConfig {
@@ -37,6 +46,13 @@ impl Default for AppConfig {
             ui_scale_factor: 1.0,
             background_style: BackgroundStyle::default(),
             texture_cache_max_entries: 20,
+            show_library: true,
+            show_info: true,
+            show_selection_window: false,
+            library_width: 300.0,
+            image_view_mode: ImageViewMode::FitToWindow,
+            library_sort_field: LibrarySortField::Name,
+            sort_direction: SortDirection::Ascending,
         }
     }
 }

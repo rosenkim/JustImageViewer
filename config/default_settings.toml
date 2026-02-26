@@ -10,6 +10,14 @@ ui_font_filename = "NanumGothic.ttf"
 ui_font_size_pixels = 14.0
 #! Global UI scale factor (1.0 = 100%)
 ui_scale_factor = 1.0
+# UI layout + viewing options persisted between runs
+show_library = true
+show_info = true
+show_selection_window = false
+library_width = 300.0
+image_view_mode = "fit_to_window"
+library_sort_field = "name"
+sort_direction = "ascending"
 
 [texture]
 # Maximum number of cached textures
