@@ -478,34 +478,6 @@ impl ViewerState {
         requested
     }
 
-    /// Decode the selected image into RGBA bytes for texture upload.
-    pub fn load_current_image_rgba(&mut self) -> anyhow::Result<Option<DecodedImage>> {
-        let Some(entry) = self.current_entry() else {
-            self.current_image_size = None;
-            self.clear_image_selection_state();
-            return Ok(None);
-        };
-        let path = entry.path.clone();
-        let file_name = entry.file_name.clone();
-        let file_size = entry.file_size;
-
-        match image_loader::load_image_rgba(&path) {
-            Ok(decoded) => {
-                self.current_image_size = Some((decoded.width, decoded.height));
-                self.status_message =
-                    format!("Viewing {} ({})", file_name, format_file_size(file_size));
-                Ok(Some(decoded))
-            }
-            Err(err) => {
-                self.current_image_size = None;
-                self.clear_image_selection_state();
-                self.status_message = format!("Failed to decode {}: {:#}", file_name, err);
-                log::error!("Image decode error for {}: {:#}", path.display(), err);
-                Err(err)
-            }
-        }
-    }
-
     fn sort_media_items(&mut self) {
         let selected_path = self.current_entry().map(|entry| entry.path.clone());
         let sort_direction = self.sort_direction;

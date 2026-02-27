@@ -639,14 +639,11 @@ fn refresh_current_texture(
     renderer: &mut imgui_wgpu::Renderer,
     texture_manager: &mut TextureManager,
 ) -> Option<UploadedTexture> {
-    let decoded = match app_state.load_current_image_rgba() {
-        Ok(Some(decoded)) => decoded,
-        Ok(None) => return None,
-        Err(_) => return None,
+    let Some(entry) = app_state.current_entry() else {
+        return None;
     };
 
-    let entry = app_state.current_entry()?;
-    match texture_manager.get_or_upload(&entry.path, &decoded, device, queue, renderer) {
+    match texture_manager.get_or_upload(&entry.path, &entry, device, queue, renderer) {
         Ok(uploaded) => Some(uploaded),
         Err(err) => {
             log::error!(

@@ -124,6 +124,7 @@ pub fn render_ui(
                         ui.child_window("library_scroll")
                             .size([0.0, -36.0])
                             .build(|| {
+                                // render file list
                                 for (index, entry) in app_state.media_items().iter().enumerate() {
                                     if render_library_item_row(
                                         ui,

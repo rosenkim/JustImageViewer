@@ -8,8 +8,12 @@ use anyhow::{Result, bail};
 use imgui::TextureId;
 use imgui_wgpu::{Renderer, Texture, TextureConfig};
 use wgpu::{Device, Extent3d, Queue, TextureFormat};
-
-use crate::core::image_loader::DecodedImage;
+use crate::{
+    core::{
+        image_loader::{self},
+        media::{MediaEntry},
+    },
+};
 
 pub struct UploadedTexture {
     pub id: TextureId,
@@ -48,7 +52,7 @@ impl TextureManager {
     pub fn get_or_upload(
         &mut self,
         path: &Path,
-        decoded: &DecodedImage,
+        entry: &MediaEntry,
         device: &Device,
         queue: &Queue,
         renderer: &mut Renderer,
@@ -64,9 +68,13 @@ impl TextureManager {
             });
         }
 
-        if decoded.pixels.is_empty() || decoded.width == 0 || decoded.height == 0 {
-            bail!("cannot upload empty image buffer");
-        }
+        let decoded = match image_loader::load_image_rgba(&entry.path)
+        {
+            Ok(decoded) => decoded,
+            Err(e) => {
+                bail!("failed to load image: {}", e);
+            }
+        };
 
         if decoded.width as u32 > self.max_texture_size
             || decoded.height as u32 > self.max_texture_size
