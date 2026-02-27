@@ -8,10 +8,7 @@ use anyhow::{Context, bail};
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    core::{
-        image_loader::{self, DecodedImage},
-        media::{self, MediaEntry},
-    },
+    core::media::{self, MediaEntry},
     infra::config::AppConfig,
 };
 

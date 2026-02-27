@@ -1,32 +1,24 @@
 use std::{
     collections::HashMap,
     path::{Path, PathBuf},
-    sync::Arc,
 };
 
+use crate::core::{image_manager::ImageManager, media::MediaEntry};
 use anyhow::{Result, bail};
 use imgui::TextureId;
 use imgui_wgpu::{Renderer, Texture, TextureConfig};
 use wgpu::{Device, Extent3d, Queue, TextureFormat};
-use crate::{
-    core::{
-        image_loader::{self},
-        media::{MediaEntry},
-    },
-};
 
 pub struct UploadedTexture {
     pub id: TextureId,
     pub width: usize,
     pub height: usize,
-    pub pixels: Arc<[u8]>,
 }
 
 struct TextureRecord {
     texture_id: TextureId,
     width: usize,
     height: usize,
-    pixels: Arc<[u8]>,
     last_used: u32,
 }
 
@@ -38,8 +30,11 @@ pub struct TextureManager {
 }
 
 impl TextureManager {
-    /// Create an empty texture cache with the given GPU max texture size limit.
-    pub fn new(max_texture_size: u32, max_cache_size: usize) -> Self {
+    /// Create texture cache and decoded image cache.
+    pub fn new(
+        max_texture_size: u32,
+        max_cache_size: usize,
+    ) -> Self {
         Self {
             textures: HashMap::new(),
             max_texture_size,
@@ -56,6 +51,7 @@ impl TextureManager {
         device: &Device,
         queue: &Queue,
         renderer: &mut Renderer,
+        image_manager: &mut ImageManager,
     ) -> Result<UploadedTexture> {
         if let Some(existing) = self.textures.get_mut(path) {
             self.access_counter += 1;
@@ -64,12 +60,10 @@ impl TextureManager {
                 id: existing.texture_id,
                 width: existing.width,
                 height: existing.height,
-                pixels: Arc::clone(&existing.pixels),
             });
         }
 
-        let decoded = match image_loader::load_image_rgba(&entry.path)
-        {
+        let decoded = match image_manager.get_or_load_rgba(&entry.path) {
             Ok(decoded) => decoded,
             Err(e) => {
                 bail!("failed to load image: {}", e);
@@ -123,7 +117,6 @@ impl TextureManager {
             texture_id,
             width: decoded.width,
             height: decoded.height,
-            pixels: Arc::clone(&decoded.pixels),
             last_used: self.access_counter,
         };
 
@@ -133,7 +126,6 @@ impl TextureManager {
             id: texture_id,
             width: decoded.width,
             height: decoded.height,
-            pixels: Arc::clone(&decoded.pixels),
         })
     }
 

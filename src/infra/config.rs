@@ -25,6 +25,7 @@ pub struct AppConfig {
     pub ui_font_size_pixels: f32,
     pub ui_scale_factor: f32,
     pub background_style: BackgroundStyle,
+    pub image_cache_count: usize,
     #[serde(alias = "max_cache_size")]
     pub texture_cache_max_entries: usize,
     pub show_library: bool,
@@ -46,6 +47,7 @@ impl Default for AppConfig {
             ui_font_size_pixels: 14.0,
             ui_scale_factor: 1.0,
             background_style: BackgroundStyle::default(),
+            image_cache_count: 32,
             texture_cache_max_entries: 20,
             show_library: true,
             show_info: true,

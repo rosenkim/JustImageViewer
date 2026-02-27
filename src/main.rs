@@ -25,6 +25,7 @@ use winit::{
     window::{Icon, WindowBuilder},
 };
 
+use crate::core::image_manager::ImageManager;
 use crate::render::app_resources::AppResources;
 use crate::render::texture_manager::{TextureManager, UploadedTexture};
 use crate::ui::render_ui;
@@ -289,13 +290,24 @@ fn main() -> anyhow::Result<()> {
         max_cache_size = 16;
     }
 
+    let mut image_cache_count = app_state.config().image_cache_count;
+    if image_cache_count == 0 {
+        log::warn!(
+            "Invalid image_cache_count ({}). Falling back to 32",
+            image_cache_count
+        );
+        image_cache_count = 32;
+    }
+
     let max_texture_size = device.limits().max_texture_dimension_2d;
+    let mut image_manager = ImageManager::new(image_cache_count);
     let mut texture_manager = TextureManager::new(max_texture_size, max_cache_size);
 
     log::info!(
-        "ImageManager created with max_texture_size: {}, max_cache_size: {}",
+        "TextureManager created with max_texture_size: {}, max_texture_cache_size: {}, image_cache_count: {}",
         max_texture_size,
-        max_cache_size
+        max_cache_size,
+        image_cache_count
     );
 
     let mut current_texture: Option<UploadedTexture> = None;
@@ -347,6 +359,7 @@ fn main() -> anyhow::Result<()> {
                             &queue,
                             &mut renderer,
                             &mut texture_manager,
+                            &mut image_manager,
                         );
                     }
 
@@ -373,6 +386,7 @@ fn main() -> anyhow::Result<()> {
                             log::error!("Surface out of memory; exiting");
                             cleanup_on_exit(
                                 &app_state,
+                                &mut image_manager,
                                 &mut texture_manager,
                                 &mut app_resources,
                                 &mut renderer,
@@ -412,6 +426,7 @@ fn main() -> anyhow::Result<()> {
                         // exit
                         cleanup_on_exit(
                             &app_state,
+                            &mut image_manager,
                             &mut texture_manager,
                             &mut app_resources,
                             &mut renderer,
@@ -471,6 +486,7 @@ fn main() -> anyhow::Result<()> {
                             // exit
                             cleanup_on_exit(
                                 &app_state,
+                                &mut image_manager,
                                 &mut texture_manager,
                                 &mut app_resources,
                                 &mut renderer,
@@ -608,11 +624,13 @@ fn save_config_on_exit(app_state: &ViewerState) {
 
 fn cleanup_on_exit(
     app_state: &ViewerState,
+    image_manager: &mut ImageManager,
     texture_manager: &mut TextureManager,
     app_resources: &mut AppResources,
     renderer: &mut imgui_wgpu::Renderer,
 ) {
     save_config_on_exit(app_state);
+    image_manager.clear();
     texture_manager.clear(renderer);
     app_resources.release(renderer);
 }
@@ -638,12 +656,13 @@ fn refresh_current_texture(
     queue: &Queue,
     renderer: &mut imgui_wgpu::Renderer,
     texture_manager: &mut TextureManager,
+    image_manager: &mut ImageManager,
 ) -> Option<UploadedTexture> {
     let Some(entry) = app_state.current_entry() else {
         return None;
     };
 
-    match texture_manager.get_or_upload(&entry.path, &entry, device, queue, renderer) {
+    match texture_manager.get_or_upload(&entry.path, &entry, device, queue, renderer, image_manager) {
         Ok(uploaded) => Some(uploaded),
         Err(err) => {
             log::error!(
