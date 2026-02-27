@@ -20,11 +20,11 @@ library_sort_field = "name"
 sort_direction = "ascending"
 show_thumbnail = true
 # Maximum number of images kept in memory cache
-image_cache_count = 16
+image_cache_count = 32
 
 [texture]
 # Maximum number of cached textures
-texture_cache_max_entries = 16
+texture_cache_max_entries = 4
 
 [background_style]
 # mode can be "checker" or "solid"

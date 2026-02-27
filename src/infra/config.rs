@@ -48,7 +48,7 @@ impl Default for AppConfig {
             ui_scale_factor: 1.0,
             background_style: BackgroundStyle::default(),
             image_cache_count: 32,
-            texture_cache_max_entries: 20,
+            texture_cache_max_entries: 4,
             show_library: true,
             show_info: true,
             show_selection_window: false,
