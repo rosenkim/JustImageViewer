@@ -1,0 +1,16 @@
+name = "image-viewer"
+product-name = "Vibe-Image-Viewer"
+identifier = "com.packager.vibe-image-viewer"
+version = "0.1.0"
+out-dir = "./dist"
+before-packaging-command = "cargo build --release"
+
+icons = [
+  "assets/icon.icns",
+  "assets/app.ico",
+  "assets/icon.png"
+]
+
+[[binaries]]
+path = "../target/release/image-viewer"
+main = true
