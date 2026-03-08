@@ -47,3 +47,4 @@ Cargo.lock
 NUL.*
 
 *.bak
+dist/

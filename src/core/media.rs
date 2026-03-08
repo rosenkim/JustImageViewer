@@ -68,6 +68,15 @@ pub struct MediaEntry {
     pub file_size: u64,
     pub modified_time: Duration,
     pub dimensions: Option<(usize, usize)>,
+    pub thumbnail: Option<ThumbnailInfo>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ThumbnailInfo {
+    pub atlas_image_id: u64,
+    pub texture_index: u64,
+    pub uvs: [f32; 4],
+    pub image_size: (u32, u32),
 }
 
 pub fn scan_directory(root: &Path) -> Result<Vec<MediaEntry>> {
@@ -126,6 +135,7 @@ pub fn scan_directory(root: &Path) -> Result<Vec<MediaEntry>> {
             file_size,
             modified_time,
             dimensions,
+            thumbnail: None,
         });
     }
 

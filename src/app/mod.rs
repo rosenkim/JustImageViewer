@@ -459,6 +459,7 @@ impl ViewerState {
             file_size,
             modified_time,
             dimensions,
+            thumbnail: None,
         }];
         self.current_index = Some(0);
         self.current_image_size = None;
