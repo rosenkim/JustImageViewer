@@ -1,6 +1,10 @@
 use std::collections::HashMap;
 use guillotiere::{AllocId, AtlasAllocator, Size};
-use wgpu::{Device, Extent3d, Queue, Texture, TextureDescriptor, TextureDimension, TextureFormat, TextureUsages};
+use wgpu::{Device, Queue};
+use imgui::TextureId;
+use imgui_wgpu::Renderer;
+use anyhow::Result;
+use super::imgui_textures::ImguiTextures;
 
 // ------------------------------------------------------------------
 // A region inside an atlas. This is what you get back when you load
@@ -11,8 +15,8 @@ use wgpu::{Device, Extent3d, Queue, Texture, TextureDescriptor, TextureDimension
 pub struct AtlasRegion {
     /// A unique number that identifies this image across ALL atlases.
     pub id: u64,
-    /// Which atlas texture this image lives in (index into the manager's list).
-    pub texture_index: u64,
+    /// Which atlas texture this image lives in (imgui TextureId).
+    pub texture_id: TextureId,
     /// UV coordinates: (u_min, v_min, u_max, v_max), all in 0.0..1.0 range.
     pub uvs: [f32; 4],
     /// The original image size in pixels (width, height).
@@ -24,8 +28,8 @@ pub struct AtlasRegion {
 // that decides where images go inside it.
 // ------------------------------------------------------------------
 struct AtlasTexture {
-    /// The GPU texture we upload pixel data into.
-    texture: Texture,
+    /// The imgui texture ID.
+    texture_id: TextureId,
     /// The rectangle packer from guillotiere.
     allocator: AtlasAllocator,
     /// The full size of this atlas in pixels.
@@ -34,29 +38,21 @@ struct AtlasTexture {
 
 impl AtlasTexture {
     /// Make a new, empty atlas texture on the GPU.
-    fn new(device: &Device, size: u32, label: &str) -> Self {
-        let texture = device.create_texture(&TextureDescriptor {
-            label: Some(label),
-            size: Extent3d {
-                width: size,
-                height: size,
-                depth_or_array_layers: 1,
-            },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: TextureDimension::D2,
-            format: TextureFormat::Rgba8UnormSrgb,
-            usage: TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_DST,
-            view_formats: &[],
-        });
-
+    fn new(
+        device: &Device,
+        queue: &Queue,
+        renderer: &mut Renderer,
+        imgui_textures: &mut ImguiTextures,
+        size: u32,
+    ) -> Result<Self> {
+        let texture_id = imgui_textures.create_atlas_texture(device, queue, renderer, size)?;
         let allocator = AtlasAllocator::new(Size::new(size as i32, size as i32));
 
-        Self {
-            texture,
+        Ok(Self {
+            texture_id,
             allocator,
             size,
-        }
+        })
     }
 
     /// Try to fit a rectangle of the given size into this atlas.
@@ -89,15 +85,13 @@ pub struct TextureAtlasManager {
     /// The pixel size used for every new atlas (e.g. 2048 means 2048x2048).
     atlas_size: u32,
     /// All the atlas textures we currently have.
-    atlases: HashMap<u64,AtlasTexture>,
-    /// The next texture ID to use for a new atlas.
-    next_texture_id: u64,
+    atlases: Vec<AtlasTexture>,
     /// Counter that goes up by one every time we load an image.
     /// This makes every image ID unique.
     next_id: u64,
     /// Reverse lookup: image ID -> (atlas index, allocation ID).
     /// We need this so we can find and remove an image by its ID.
-    id_to_location: HashMap<u64, (u64, AllocId)>,
+    id_to_location: HashMap<u64, (usize, AllocId)>,
 }
 
 impl TextureAtlasManager {
@@ -106,11 +100,17 @@ impl TextureAtlasManager {
     pub fn new(atlas_size: u32) -> Self {
         Self {
             atlas_size,
-            atlases: HashMap::new(),
-            next_texture_id: 1,
-            next_id: 1, // start at 1 so 0 can mean "no image"
+            atlases: Vec::new(),
+            next_id: 1,
             id_to_location: HashMap::new(),
         }
+    }
+
+    pub fn clear(&mut self, renderer: &mut Renderer, imgui_textures: &mut ImguiTextures) {
+        for atlas in self.atlases.drain(..) {
+            imgui_textures.remove(renderer, atlas.texture_id);
+        }
+        self.id_to_location.clear();
     }
 
     /// Load RGBA pixel data into the atlas and get back an AtlasRegion.
@@ -125,10 +125,12 @@ impl TextureAtlasManager {
         &mut self,
         device: &Device,
         queue: &Queue,
+        renderer: &mut Renderer,
+        imgui_textures: &mut ImguiTextures,
         width: u32,
         height: u32,
         rgba_data: &[u8],
-    ) -> AtlasRegion {
+    ) -> Result<AtlasRegion> {
         // Sanity check: the image must not be bigger than the atlas itself.
         assert!(
             width <= self.atlas_size && height <= self.atlas_size,
@@ -139,24 +141,31 @@ impl TextureAtlasManager {
         );
 
         // Try every atlas we already have.
-        for (&tex_id, atlas) in self.atlases.iter_mut() {
+        for (atlas_idx, atlas) in self.atlases.iter_mut().enumerate() {
             if let Some((alloc_id, (x, y))) = atlas.try_allocate(width, height) {
                 // Found space – upload pixels and return the region.
-                let target_tex_id: u64 = tex_id;
                 let id = self.next_id;
                 self.next_id += 1;
 
-                upload_to_texture(queue, &atlas.texture, x, y, width, height, rgba_data);
-                self.id_to_location.insert(id, (target_tex_id, alloc_id));
+                imgui_textures.update_sub_region(
+                    queue,
+                    renderer,
+                    atlas.texture_id,
+                    x,
+                    y,
+                    width,
+                    height,
+                    rgba_data,
+                )?;
+                self.id_to_location.insert(id, (atlas_idx, alloc_id));
 
-                return make_region(id, target_tex_id, x, y, width, height, atlas.size);
+                return Ok(make_region(id, atlas.texture_id, x, y, width, height, atlas.size));
             }
         }
 
         // No atlas had room – make a new one.
         let atlas_idx = self.atlases.len();
-        let label = format!("atlas_{}", atlas_idx);
-        let mut atlas = AtlasTexture::new(device, self.atlas_size, &label);
+        let mut atlas = AtlasTexture::new(device, queue, renderer, imgui_textures, self.atlas_size)?;
 
         let (alloc_id, (x, y)) = atlas
             .try_allocate(width, height)
@@ -164,15 +173,23 @@ impl TextureAtlasManager {
 
         let id = self.next_id;
         self.next_id += 1;
-        let tex_id = self.next_texture_id;
-        self.next_texture_id += 1;
 
-        upload_to_texture(queue, &atlas.texture, x, y, width, height, rgba_data);
+        imgui_textures.update_sub_region(
+            queue,
+            renderer,
+            atlas.texture_id,
+            x,
+            y,
+            width,
+            height,
+            rgba_data,
+        )?;
 
-        self.id_to_location.insert(id, (tex_id, alloc_id));
-        self.atlases.insert(tex_id, atlas);
+        let texture_id = atlas.texture_id;
+        self.id_to_location.insert(id, (atlas_idx, alloc_id));
+        self.atlases.push(atlas);
 
-        make_region(id, tex_id, x, y, width, height, self.atlas_size)
+        Ok(make_region(id, texture_id, x, y, width, height, self.atlas_size))
     }
 
     /// Remove an image by its unique ID.
@@ -180,70 +197,43 @@ impl TextureAtlasManager {
     /// If this was the last image in its atlas, the atlas is destroyed
     /// to free GPU memory. Returns `true` if the ID was found and
     /// removed, `false` if it didn't exist.
-    pub fn remove_image(&mut self, id: u64) -> bool {
-        let Some((tex_id, alloc_id)) = self.id_to_location.remove(&id) else {
+    pub fn remove_image(
+        &mut self,
+        renderer: &mut Renderer,
+        imgui_textures: &mut ImguiTextures,
+        id: u64,
+    ) -> bool {
+        let Some((atlas_idx, alloc_id)) = self.id_to_location.remove(&id) else {
             return false;
         };
 
         // Free the rectangle inside the packer.
-        let atlas = match self.atlases.get_mut(&tex_id) {
+        let atlas = match self.atlases.get_mut(atlas_idx) {
             Some(atlas) => atlas,
             None => return false,
         };
         atlas.deallocate(alloc_id);
+
         // If nobody is using this atlas any more, drop it entirely.
         if atlas.is_empty() {
-            self.atlases.remove(&tex_id);
+            let removed_atlas = self.atlases.remove(atlas_idx);
+            imgui_textures.remove(renderer, removed_atlas.texture_id);
+
+            // Update indices in id_to_location for all images in atlases after the removed one.
+            for (_, (idx, _)) in self.id_to_location.iter_mut() {
+                if *idx > atlas_idx {
+                    *idx -= 1;
+                }
+            }
         }
 
         true
-    }
-
-    /// Get a reference to the raw wgpu Texture for a given atlas index.
-    /// Useful when you need to create a TextureView for your shader.
-    pub fn get_texture(&self, texture_index: u64) -> Option<&Texture> {
-        self.atlases.get(&texture_index).map(|a| &a.texture)
     }
 
     /// How many atlas textures are currently alive.
     pub fn atlas_count(&self) -> usize {
         self.atlases.len()
     }
-
-}
-
-// ------------------------------------------------------------------
-// Helper: upload raw RGBA bytes into a sub-region of a GPU texture.
-// ------------------------------------------------------------------
-fn upload_to_texture(
-    queue: &Queue,
-    texture: &Texture,
-    x: u32,
-    y: u32,
-    width: u32,
-    height: u32,
-    rgba_data: &[u8],
-) {
-    queue.write_texture(
-        wgpu::TexelCopyTextureInfo {
-            texture,
-            mip_level: 0,
-            origin: wgpu::Origin3d { x, y, z: 0 },
-            aspect: wgpu::TextureAspect::All,
-        },
-        rgba_data,
-        wgpu::TexelCopyBufferLayout {
-            offset: 0,
-            // 4 bytes per pixel (RGBA).
-            bytes_per_row: Some(4 * width),
-            rows_per_image: Some(height),
-        },
-        Extent3d {
-            width,
-            height,
-            depth_or_array_layers: 1,
-        },
-    );
 }
 
 // ------------------------------------------------------------------
@@ -251,7 +241,7 @@ fn upload_to_texture(
 // ------------------------------------------------------------------
 fn make_region(
     id: u64,
-    texture_index: u64,
+    texture_id: TextureId,
     x: u32,
     y: u32,
     width: u32,
@@ -262,12 +252,12 @@ fn make_region(
 
     AtlasRegion {
         id,
-        texture_index,
+        texture_id,
         uvs: [
-            x as f32 / size_f,            // u_min (left)
-            y as f32 / size_f,            // v_min (top)
-            (x + width) as f32 / size_f,  // u_max (right)
-            (y + height) as f32 / size_f, // v_max (bottom)
+            x as f32 / size_f,
+            y as f32 / size_f,
+            (x + width) as f32 / size_f,
+            (y + height) as f32 / size_f,
         ],
         image_size: (width, height),
     }

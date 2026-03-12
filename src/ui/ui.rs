@@ -2,7 +2,7 @@ use crate::app::{ImageViewMode, LibrarySortField, SortDirection, ViewerState, fo
 use crate::core::media::MediaEntry;
 use crate::math::{Point2D, Rect2D};
 use crate::render::app_resources::AppResources;
-use crate::render::texture_manager::UploadedTexture;
+use crate::render::image_uploader::UploadedTexture;
 use imgui::{Condition, MouseCursor, StyleVar, TableFlags, Ui};
 
 use super::helper::render_image_selection_widget;
@@ -449,7 +449,11 @@ fn render_library_item_row(
             .size(thumbnail_size_xy)
             .border(false)
             .build(|| {
-                imgui::Image::new(app_resources.empty_icon_texture_id, thumbnail_size_xy).build(ui);
+                let region = &app_resources.empty_icon_region;
+                imgui::Image::new(region.texture_id, thumbnail_size_xy)
+                    .uv0([region.uvs[0], region.uvs[1]])
+                    .uv1([region.uvs[2], region.uvs[3]])
+                    .build(ui);
             });
         ui.same_line();
 

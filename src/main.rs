@@ -27,7 +27,9 @@ use winit::{
 
 use crate::core::image_manager::ImageManager;
 use crate::render::app_resources::AppResources;
-use crate::render::texture_manager::{TextureManager, UploadedTexture};
+use crate::render::imgui_textures::ImguiTextures;
+use crate::render::texture_atlas_manager::TextureAtlasManager;
+use crate::render::image_uploader::{ImageUploader, UploadedTexture};
 use crate::ui::render_ui;
 
 const FOCUSED_FPS: u32 = 60;
@@ -278,6 +280,8 @@ fn main() -> anyhow::Result<()> {
         ..RendererConfig::default()
     };
     let mut renderer = imgui_wgpu::Renderer::new(&mut imgui, &device, &queue, renderer_config);
+    let mut imgui_textures = ImguiTextures::new();
+    let mut texture_atlas = TextureAtlasManager::new(2048);
     let mut app_resources = AppResources::new(&device, &queue, &mut renderer)
         .context("failed to initialize global app resources")?;
 
@@ -301,7 +305,7 @@ fn main() -> anyhow::Result<()> {
 
     let max_texture_size = device.limits().max_texture_dimension_2d;
     let mut image_manager = ImageManager::new(image_cache_count);
-    let mut texture_manager = TextureManager::new(max_texture_size, max_cache_size);
+    let mut image_uploader = ImageUploader::new(max_texture_size, max_cache_size);
 
     log::info!(
         "TextureManager created with max_texture_size: {}, max_texture_cache_size: {}, image_cache_count: {}",
@@ -358,7 +362,8 @@ fn main() -> anyhow::Result<()> {
                             &device,
                             &queue,
                             &mut renderer,
-                            &mut texture_manager,
+                            &mut image_uploader,
+                            &mut imgui_textures,
                             &mut image_manager,
                         );
                     }
@@ -387,7 +392,9 @@ fn main() -> anyhow::Result<()> {
                             cleanup_on_exit(
                                 &app_state,
                                 &mut image_manager,
-                                &mut texture_manager,
+                                &mut image_uploader,
+                                &mut texture_atlas,
+                                &mut imgui_textures,
                                 &mut app_resources,
                                 &mut renderer,
                             );
@@ -427,7 +434,9 @@ fn main() -> anyhow::Result<()> {
                         cleanup_on_exit(
                             &app_state,
                             &mut image_manager,
-                            &mut texture_manager,
+                            &mut image_uploader,
+                            &mut texture_atlas,
+                            &mut imgui_textures,
                             &mut app_resources,
                             &mut renderer,
                         );
@@ -487,7 +496,9 @@ fn main() -> anyhow::Result<()> {
                             cleanup_on_exit(
                                 &app_state,
                                 &mut image_manager,
-                                &mut texture_manager,
+                                &mut image_uploader,
+                                &mut texture_atlas,
+                                &mut imgui_textures,
                                 &mut app_resources,
                                 &mut renderer,
                             );
@@ -625,13 +636,16 @@ fn save_config_on_exit(app_state: &ViewerState) {
 fn cleanup_on_exit(
     app_state: &ViewerState,
     image_manager: &mut ImageManager,
-    texture_manager: &mut TextureManager,
+    image_uploader: &mut ImageUploader,
+    texture_atlas: &mut TextureAtlasManager,
+    imgui_textures: &mut ImguiTextures,
     app_resources: &mut AppResources,
     renderer: &mut imgui_wgpu::Renderer,
 ) {
     save_config_on_exit(app_state);
     image_manager.clear();
-    texture_manager.clear(renderer);
+    image_uploader.clear(renderer, imgui_textures);
+    texture_atlas.clear(renderer, imgui_textures);
     app_resources.release(renderer);
 }
 
@@ -655,14 +669,23 @@ fn refresh_current_texture(
     device: &Device,
     queue: &Queue,
     renderer: &mut imgui_wgpu::Renderer,
-    texture_manager: &mut TextureManager,
+    image_uploader: &mut ImageUploader,
+    imgui_textures: &mut ImguiTextures,
     image_manager: &mut ImageManager,
 ) -> Option<UploadedTexture> {
     let Some(entry) = app_state.current_entry() else {
         return None;
     };
 
-    match texture_manager.get_or_upload(&entry.path, &entry, device, queue, renderer, image_manager) {
+    match image_uploader.get_or_upload(
+        &entry.path,
+        &entry,
+        device,
+        queue,
+        renderer,
+        imgui_textures,
+        image_manager,
+    ) {
         Ok(uploaded) => Some(uploaded),
         Err(err) => {
             log::error!(

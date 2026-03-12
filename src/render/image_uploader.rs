@@ -3,11 +3,11 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use crate::core::{image_manager::ImageManager, media::MediaEntry};
+use crate::{core::{image_manager::ImageManager, media::MediaEntry}, render::imgui_textures};
+use crate::render::imgui_textures::ImguiTextures;
 use anyhow::{Result, bail};
 use imgui::TextureId;
-use imgui_wgpu::{Renderer, Texture, TextureConfig};
-use wgpu::{Device, Extent3d, Queue, TextureFormat};
+use wgpu::{Device, Queue};
 
 pub struct UploadedTexture {
     pub id: TextureId,
@@ -22,14 +22,14 @@ struct TextureRecord {
     last_used: u32,
 }
 
-pub struct TextureManager {
+pub struct ImageUploader {
     textures: HashMap<PathBuf, TextureRecord>,
     max_texture_size: u32,
     max_cache_size: usize,
     access_counter: u32,
 }
 
-impl TextureManager {
+impl ImageUploader {
     /// Create texture cache and decoded image cache.
     pub fn new(
         max_texture_size: u32,
@@ -50,7 +50,8 @@ impl TextureManager {
         entry: &MediaEntry,
         device: &Device,
         queue: &Queue,
-        renderer: &mut Renderer,
+        renderer: &mut imgui_wgpu::Renderer,
+        imgui_textures: &mut ImguiTextures,
         image_manager: &mut ImageManager,
     ) -> Result<UploadedTexture> {
         if let Some(existing) = self.textures.get_mut(path) {
@@ -81,36 +82,18 @@ impl TextureManager {
             );
         }
 
-        let texture = Texture::new(
+        // Use ImguiTextures to create the texture
+        let texture_id = imgui_textures.create_from_rgba_data(
             device,
-            renderer,
-            TextureConfig {
-                size: Extent3d {
-                    width: decoded.width as u32,
-                    height: decoded.height as u32,
-                    depth_or_array_layers: 1,
-                },
-                label: Some("image-viewer texture"),
-                format: Some(TextureFormat::Rgba8UnormSrgb),
-                mip_level_count: 1,
-                sampler_desc: wgpu::SamplerDescriptor {
-                    mag_filter: wgpu::FilterMode::Linear,
-                    min_filter: wgpu::FilterMode::Linear,
-                    mipmap_filter: wgpu::FilterMode::Nearest,
-                    ..wgpu::SamplerDescriptor::default()
-                },
-                ..TextureConfig::default()
-            },
-        );
-        texture.write(
             queue,
-            &decoded.pixels,
+            renderer,
             decoded.width as u32,
             decoded.height as u32,
-        );
-        let texture_id = renderer.textures.insert(texture);
+            &decoded.pixels,
+            true, // Use linear filter as before
+        )?;
 
-        self.evict_if_full(renderer);
+        self.evict_if_full(renderer, imgui_textures);
 
         self.access_counter += 1;
         let record = TextureRecord {
@@ -130,7 +113,7 @@ impl TextureManager {
     }
 
     /// Evict the least-recently-used entry if the cache is at capacity.
-    fn evict_if_full(&mut self, renderer: &mut Renderer) {
+    fn evict_if_full(&mut self, renderer: &mut imgui_wgpu::Renderer, imgui_textures: &mut ImguiTextures) {
         if self.textures.len() < self.max_cache_size {
             return;
         }
@@ -144,15 +127,14 @@ impl TextureManager {
         if let Some(key) = oldest_key {
             if let Some(record) = self.textures.remove(&key) {
                 log::debug!("Evicting cached texture: {}", key.display());
-                renderer.textures.remove(record.texture_id);
+                imgui_textures.remove(renderer, record.texture_id);
             }
         }
     }
 
     /// Free all GPU textures owned by this manager.
-    pub fn clear(&mut self, renderer: &mut Renderer) {
-        for record in self.textures.drain().map(|(_, record)| record) {
-            renderer.textures.remove(record.texture_id);
-        }
+    pub fn clear(&mut self, renderer: &mut imgui_wgpu::Renderer, imgui_textures: &mut ImguiTextures) {
+        self.textures.clear();
+        imgui_textures.clear(renderer);
     }
 }

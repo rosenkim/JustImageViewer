@@ -1,15 +1,19 @@
 use std::path::Path;
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result};
 use imgui::TextureId;
-use imgui_wgpu::{Renderer, Texture, TextureConfig};
-use wgpu::{Device, Extent3d, Queue, TextureFormat};
+use imgui_wgpu::Renderer;
+use wgpu::{Device, Queue};
 
 use crate::core::image_loader;
+use super::texture_atlas_manager::{TextureAtlasManager, AtlasRegion};
+use super::imgui_textures::ImguiTextures;
 
 pub struct AppResources {
     pub empty_icon_texture_id: TextureId,
-    texture_ids: Vec<TextureId>,
+    pub empty_icon_region: AtlasRegion,
+    texture_atlas_manager: TextureAtlasManager,
+    imgui_textures: ImguiTextures,
 }
 
 impl AppResources {
@@ -26,57 +30,31 @@ impl AppResources {
             )
         })?;
 
-        if decoded.width as u32 > device.limits().max_texture_dimension_2d
-            || decoded.height as u32 > device.limits().max_texture_dimension_2d
-        {
-            bail!(
-                "empty image icon {}x{} exceeds GPU max texture size {}",
-                decoded.width,
-                decoded.height,
-                device.limits().max_texture_dimension_2d
-            );
-        }
+        let mut texture_atlas_manager = TextureAtlasManager::new(2048);
+        let mut imgui_textures = ImguiTextures::new();
 
-        let texture = Texture::new(
+        let empty_icon_region = texture_atlas_manager.load_image(
             device,
-            renderer,
-            TextureConfig {
-                size: Extent3d {
-                    width: decoded.width as u32,
-                    height: decoded.height as u32,
-                    depth_or_array_layers: 1,
-                },
-                label: Some("image-viewer empty icon texture"),
-                format: Some(TextureFormat::Rgba8UnormSrgb),
-                mip_level_count: 1,
-                sampler_desc: wgpu::SamplerDescriptor {
-                    mag_filter: wgpu::FilterMode::Linear,
-                    min_filter: wgpu::FilterMode::Linear,
-                    mipmap_filter: wgpu::FilterMode::Nearest,
-                    ..wgpu::SamplerDescriptor::default()
-                },
-                ..TextureConfig::default()
-            },
-        );
-        texture.write(
             queue,
-            &decoded.pixels,
+            renderer,
+            &mut imgui_textures,
             decoded.width as u32,
             decoded.height as u32,
-        );
+            &decoded.pixels,
+        )?;
 
-        let empty_icon_texture_id = renderer.textures.insert(texture);
+        let empty_icon_texture_id = empty_icon_region.texture_id;
 
         Ok(Self {
             empty_icon_texture_id,
-            texture_ids: vec![empty_icon_texture_id],
+            empty_icon_region,
+            texture_atlas_manager,
+            imgui_textures,
         })
     }
 
     /// Release all global resources allocated by this object.
     pub fn release(&mut self, renderer: &mut Renderer) {
-        for texture_id in self.texture_ids.drain(..) {
-            renderer.textures.remove(texture_id);
-        }
+        self.texture_atlas_manager.clear(renderer, &mut self.imgui_textures);
     }
 }
