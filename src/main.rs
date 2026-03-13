@@ -95,6 +95,13 @@ fn make_instance() -> wgpu::Instance {
 
 /// App entrypoint: setup systems, run UI loop, then save config.
 fn main() -> anyhow::Result<()> {
+    // Build a Tokio runtime so that tokio::task::spawn (used for thumbnail
+    // workers) has a reactor to run on. We keep `_rt` alive for the whole
+    // process; winit's event loop is synchronous so we cannot use
+    // #[tokio::main] directly.
+    let _rt = tokio::runtime::Runtime::new().context("failed to create Tokio runtime")?;
+    let _rt_guard = _rt.enter();
+
     let args = parse_args().context("failed to parse command line arguments")?;
 
     infra::logging::init();
@@ -327,6 +334,7 @@ fn main() -> anyhow::Result<()> {
     // Main event loop: handle OS/window events and drive rendering.
     event_loop
         .run(move |event, window_target| {
+            //
             // Let ImGui/winit helper see every event (mouse, keyboard, etc.).
             platform.handle_event(imgui.io_mut(), window.as_ref(), &event);
 
@@ -375,6 +383,19 @@ fn main() -> anyhow::Result<()> {
                     }
                     // Ask OS to trigger a redraw event.
                     window.request_redraw();
+                    //
+                    let results = app_state.poll_thumbnail_results();
+                    for result in results {
+                        app_state.apply_thumbnail_info(
+                            result,
+                            &device,
+                            &queue,
+                            &mut renderer,
+                            &mut imgui_textures,
+                            &mut texture_atlas,
+                        );
+            }
+
                 }
                 // Handle actual drawing when the window says it needs a redraw.
                 Event::WindowEvent {

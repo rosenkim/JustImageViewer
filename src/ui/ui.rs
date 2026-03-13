@@ -449,10 +449,26 @@ fn render_library_item_row(
             .size(thumbnail_size_xy)
             .border(false)
             .build(|| {
-                let region = &app_resources.empty_icon_region;
-                imgui::Image::new(region.texture_id, thumbnail_size_xy)
-                    .uv0([region.uvs[0], region.uvs[1]])
-                    .uv1([region.uvs[2], region.uvs[3]])
+                let cell = LIBRARY_THUMBNAIL_SIZE;
+                let (texture_id, uvs, img_w, img_h) = if let Some(thumbnail) = &entry.thumbnail {
+                    let (w, h) = thumbnail.image_size;
+                    (thumbnail.texture_index, thumbnail.uvs, w, h)
+                } else {
+                    let region = &app_resources.empty_icon_region;
+                    let (w, h) = region.image_size;
+                    (region.texture_id, region.uvs, w, h)
+                };
+                let scale = (cell / img_w as f32).min(cell / img_h as f32);
+                let draw_w = img_w as f32 * scale;
+                let draw_h = img_h as f32 * scale;
+                let cursor = ui.cursor_pos();
+                ui.set_cursor_pos([
+                    cursor[0] + (cell - draw_w) * 0.5,
+                    cursor[1] + (cell - draw_h) * 0.5,
+                ]);
+                imgui::Image::new(texture_id, [draw_w, draw_h])
+                    .uv0([uvs[0], uvs[1]])
+                    .uv1([uvs[2], uvs[3]])
                     .build(ui);
             });
         ui.same_line();

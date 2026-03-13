@@ -19,6 +19,7 @@ rfd = "0.13"
 serde = { version = "1.0", features = ["derive"] }
 toml = "0.8"
 guillotiere = "0.6"
+tokio = { version = "1.50", features = ["full"] }
 
 [build-dependencies]
 winres = "0.1"

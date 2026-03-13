@@ -74,7 +74,7 @@ pub struct MediaEntry {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ThumbnailInfo {
     pub atlas_image_id: u64,
-    pub texture_index: u64,
+    pub texture_index: imgui::TextureId,
     pub uvs: [f32; 4],
     pub image_size: (u32, u32),
 }

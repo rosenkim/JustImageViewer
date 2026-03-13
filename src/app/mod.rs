@@ -1,6 +1,7 @@
 use std::{
     ffi::OsStr,
     path::{Path, PathBuf},
+    sync::Arc,
     time::UNIX_EPOCH,
 };
 
@@ -8,9 +9,16 @@ use anyhow::{Context, bail};
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    core::media::{self, MediaEntry},
+    core::media::{self, MediaEntry, ThumbnailInfo},
     infra::config::AppConfig,
+    render::{
+        imgui_textures::ImguiTextures,
+        texture_atlas_manager::TextureAtlasManager,
+    },
 };
+
+use tokio::sync::mpsc;
+use crate::core::image_loader;
 
 pub use crate::math::Rect2D;
 
@@ -93,6 +101,19 @@ pub struct ViewerState {
     image_selection: Option<Rect2D>,
     image_selection_drag_start: Option<[f32; 2]>,
     image_selection_drag_mode: Option<ImageSelectionDragMode>,
+
+    worker_handles: Vec<tokio::task::JoinHandle<()>>,
+    thumbnail_tx: Option<mpsc::Sender<ThumbnailResult>>,
+    thumbnail_rx: Option<mpsc::Receiver<ThumbnailResult>>,
+}
+
+/// Decoded thumbnail pixels sent from the worker task back to the main thread.
+pub struct ThumbnailResult {
+    pub index: usize,
+    pub path: PathBuf,
+    pub width: u32,
+    pub height: u32,
+    pub pixels: Arc<[u8]>,
 }
 
 impl ViewerState {
@@ -135,6 +156,10 @@ impl ViewerState {
             image_selection: None,
             image_selection_drag_start: None,
             image_selection_drag_mode: None,
+
+            worker_handles: Vec::new(),
+            thumbnail_tx: None,
+            thumbnail_rx: None,
         }
     }
 
@@ -373,8 +398,146 @@ impl ViewerState {
         }
     }
 
+    fn drop_handles(&mut self) {
+        for handle in self.worker_handles.iter() {
+            if !handle.is_finished() {
+                handle.abort();
+            }
+        }
+
+        self.thumbnail_rx = None;
+        self.thumbnail_tx = None;
+        self.worker_handles.clear();
+    }
+
+    fn spawn_thumbnail_work(&mut self) {
+        // Collect (index, path) pairs for entries that don't have a thumbnail yet.
+        let paths: Vec<(usize, PathBuf)> = self
+            .media_items
+            .iter()
+            .enumerate()
+            .filter(|(_, entry)| entry.thumbnail.is_none())
+            .map(|(i, entry)| (i, entry.path.clone()))
+            .collect();
+
+        if paths.is_empty() {
+            return;
+        }
+
+        let (tx, rx) = mpsc::channel::<ThumbnailResult>(64);
+        self.thumbnail_tx = Some(tx.clone());
+        self.thumbnail_rx = Some(rx);
+
+        let handle = tokio::task::spawn(async move {
+            for (index, path) in paths {
+                // Use spawn_blocking so heavy image decoding doesn't block the async runtime.
+                let result = tokio::task::spawn_blocking({
+                    let path = path.clone();
+                    move || -> anyhow::Result<crate::core::image_loader::DecodedImage> {
+                        image_loader::load_thumbnail_rgba(&path, 128)
+                    }
+                })
+                .await;
+
+                match result {
+                    Ok(Ok(decoded)) => {
+                        let msg = ThumbnailResult {
+                            index,
+                            path,
+                            width: decoded.width as u32,
+                            height: decoded.height as u32,
+                            pixels: decoded.pixels,
+                        };
+                        // If the receiver has been dropped (new directory loaded), stop.
+                        if tx.send(msg).await.is_err() {
+                            break;
+                        }
+                    }
+                    Ok(Err(err)) => {
+                        log::warn!("Failed to load thumbnail for {}: {:#}", path.display(), err);
+                    }
+                    Err(err) => {
+                        log::warn!("Thumbnail task panicked for {}: {:#}", path.display(), err);
+                    }
+                }
+
+                tokio::task::yield_now().await;
+            }
+        });
+
+        self.worker_handles.push(handle);
+    }
+
+    /// Drain pending thumbnail results from the worker channel.
+    /// Returns raw decoded pixel data; the caller is responsible for uploading
+    /// to the GPU atlas and then calling `apply_thumbnail_info`.
+    pub fn poll_thumbnail_results(&mut self) -> Vec<ThumbnailResult> {
+        let Some(rx) = self.thumbnail_rx.as_mut() else {
+            return Vec::new();
+        };
+
+        let mut results = Vec::new();
+        while let Ok(result) = rx.try_recv() {
+            // Only keep results that still correspond to the current media list.
+            if self
+                .media_items
+                .get(result.index)
+                .is_some_and(|entry| entry.path == result.path)
+            {
+                results.push(result);
+            }
+        }
+        results
+    }
+
+    /// Upload thumbnail pixels to the GPU atlas and write the resulting
+    /// `ThumbnailInfo` back into the corresponding `MediaEntry`.
+    pub fn apply_thumbnail_info(
+        &mut self,
+        result: ThumbnailResult,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        renderer: &mut imgui_wgpu::Renderer,
+        imgui_textures: &mut ImguiTextures,
+        texture_atlas: &mut TextureAtlasManager,
+    ) {
+        // Check index/path are still valid before doing expensive GPU work.
+        let entry = match self.media_items.get_mut(result.index) {
+            Some(e) if e.path == result.path => e,
+            _ => return,
+        };
+
+        match texture_atlas.load_image(
+            device,
+            queue,
+            renderer,
+            imgui_textures,
+            result.width,
+            result.height,
+            &result.pixels,
+        ) {
+            Ok(region) => {
+                entry.thumbnail = Some(ThumbnailInfo {
+                    atlas_image_id: region.id,
+                    texture_index: region.texture_id,
+                    uvs: region.uvs,
+                    image_size: region.image_size,
+                });
+            }
+            Err(err) => {
+                log::warn!(
+                    "Failed to upload thumbnail for {}: {:#}",
+                    result.path.display(),
+                    err
+                );
+            }
+        }
+    }
+
     /// Load images from a directory and choose which image to focus first.
     pub fn load_directory(&mut self, directory: PathBuf, focus_file: Option<PathBuf>) {
+        self.drop_handles();
+
         let directory_display = directory.display().to_string();
         match media::scan_directory(&directory) {
             Ok(entries) => {
@@ -411,6 +574,9 @@ impl ViewerState {
                 self.status_message = format!("Loaded {} images from {}", total, directory_display);
                 self.needs_image_reload = true;
                 self.clear_image_selection_state();
+
+                // spawn thumbnails work
+                self.spawn_thumbnail_work();
             }
             Err(err) => {
                 self.status_message = format!("Failed to read {}: {:#}", directory_display, err);
