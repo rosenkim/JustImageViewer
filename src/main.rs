@@ -7,7 +7,7 @@ mod math;
 mod render;
 mod ui;
 
-use anyhow::{Context, bail};
+use anyhow::{bail, Context};
 use app::ViewerState;
 use imgui::{Context as ImguiContext, FontConfig, FontGlyphRanges, FontSource};
 use imgui_wgpu::RendererConfig;
@@ -15,6 +15,7 @@ use imgui_winit_support::{HiDpiMode, WinitPlatform};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
+use tokio::task::block_in_place;
 use wgpu::{Backends, Device, Instance, InstanceDescriptor};
 use wgpu::{CompositeAlphaMode, Queue, Surface, SurfaceConfiguration, SurfaceError};
 use winit::{
@@ -94,14 +95,8 @@ fn make_instance() -> wgpu::Instance {
 }
 
 /// App entrypoint: setup systems, run UI loop, then save config.
-fn main() -> anyhow::Result<()> {
-    // Build a Tokio runtime so that tokio::task::spawn (used for thumbnail
-    // workers) has a reactor to run on. We keep `_rt` alive for the whole
-    // process; winit's event loop is synchronous so we cannot use
-    // #[tokio::main] directly.
-    let _rt = tokio::runtime::Runtime::new().context("failed to create Tokio runtime")?;
-    let _rt_guard = _rt.enter();
-
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
     let args = parse_args().context("failed to parse command line arguments")?;
 
     infra::logging::init();
@@ -148,26 +143,30 @@ fn main() -> anyhow::Result<()> {
         .create_surface(window.clone())
         .context("failed to create wgpu surface")?;
 
-    let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
-        power_preference: wgpu::PowerPreference::HighPerformance,
-        compatible_surface: Some(&surface),
-        force_fallback_adapter: false,
-    }))
+    let adapter = instance
+        .request_adapter(&wgpu::RequestAdapterOptions {
+            power_preference: wgpu::PowerPreference::HighPerformance,
+            compatible_surface: Some(&surface),
+            force_fallback_adapter: false,
+        })
+        .await
     .context("failed to request wgpu adapter")?;
 
     let adapter_limits = adapter.limits();
 
-    let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
-        label: Some("image-viewer device"),
-        required_features: wgpu::Features::empty(),
-        // required_limits: wgpu::Limits::default(),
-        required_limits: wgpu::Limits {
-            max_texture_dimension_2d: adapter_limits.max_texture_dimension_2d,
-            ..wgpu::Limits::downlevel_defaults()
-        },
-        memory_hints: wgpu::MemoryHints::MemoryUsage,
-        trace: wgpu::Trace::Off,
-    }))
+    let (device, queue) = adapter
+        .request_device(&wgpu::DeviceDescriptor {
+            label: Some("image-viewer device"),
+            required_features: wgpu::Features::empty(),
+            // required_limits: wgpu::Limits::default(),
+            required_limits: wgpu::Limits {
+                max_texture_dimension_2d: adapter_limits.max_texture_dimension_2d,
+                ..wgpu::Limits::downlevel_defaults()
+            },
+            memory_hints: wgpu::MemoryHints::MemoryUsage,
+            trace: wgpu::Trace::Off,
+        })
+        .await
     .context("failed to request wgpu device")?;
 
     let mut surface_config = create_surface_config(&surface, &adapter, window.inner_size())
@@ -332,8 +331,8 @@ fn main() -> anyhow::Result<()> {
 
     let _instance = instance;
     // Main event loop: handle OS/window events and drive rendering.
-    event_loop
-        .run(move |event, window_target| {
+    block_in_place(|| {
+        event_loop.run(move |event, window_target| {
             //
             // Let ImGui/winit helper see every event (mouse, keyboard, etc.).
             platform.handle_event(imgui.io_mut(), window.as_ref(), &event);
@@ -394,118 +393,7 @@ fn main() -> anyhow::Result<()> {
                             &mut imgui_textures,
                             &mut texture_atlas,
                         );
-            }
-
-                }
-                // Handle actual drawing when the window says it needs a redraw.
-                Event::WindowEvent {
-                    event: WindowEvent::RedrawRequested,
-                    window_id,
-                } if window_id == window.id() => {
-                    let frame = match surface.get_current_texture() {
-                        Ok(frame) => frame,
-                        Err(SurfaceError::Lost) | Err(SurfaceError::Outdated) => {
-                            surface.configure(&device, &surface_config);
-                            return;
-                        }
-                        Err(SurfaceError::OutOfMemory) => {
-                            log::error!("Surface out of memory; exiting");
-                            cleanup_on_exit(
-                                &app_state,
-                                &mut image_manager,
-                                &mut image_uploader,
-                                &mut texture_atlas,
-                                &mut imgui_textures,
-                                &mut app_resources,
-                                &mut renderer,
-                            );
-                            window_target.exit();
-                            return;
-                        }
-                        Err(SurfaceError::Timeout) => {
-                            return;
-                        }
-                        Err(SurfaceError::Other) => {
-                            log::warn!(
-                                "Surface returned an unspecified error; retrying next frame"
-                            );
-                            return;
-                        }
-                    };
-
-                    // Create view into the current frame's texture.
-                    let view = frame
-                        .texture
-                        .create_view(&wgpu::TextureViewDescriptor::default());
-
-                    // Build ImGui UI for this frame.
-                    let ui = imgui.frame();
-                    let mut running = true;
-                    // Clone to avoid moving out of the closure-captured option.
-                    render_ui(
-                        ui,
-                        &mut app_state,
-                        current_texture.as_ref(),
-                        &app_resources,
-                        &mut running,
-                    );
-
-                    if !running {
-                        // exit
-                        cleanup_on_exit(
-                            &app_state,
-                            &mut image_manager,
-                            &mut image_uploader,
-                            &mut texture_atlas,
-                            &mut imgui_textures,
-                            &mut app_resources,
-                            &mut renderer,
-                        );
-                        window_target.exit();
-                        return;
                     }
-
-                    // Tell ImGui/winit helper we are ready to render.
-                    platform.prepare_render(ui, window.as_ref());
-                    // Get draw lists from ImGui.
-                    let draw_data = imgui.render();
-
-                    let mut encoder =
-                        device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                            label: Some("image-viewer encoder"),
-                        });
-
-                    {
-                        // Begin a render pass to clear screen and draw ImGui.
-                        let mut rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                            label: Some("image-viewer render pass"),
-                            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                                view: &view,
-                                resolve_target: None,
-                                ops: wgpu::Operations {
-                                    load: wgpu::LoadOp::Clear(wgpu::Color {
-                                        r: 0.08,
-                                        g: 0.09,
-                                        b: 0.11,
-                                        a: 1.0,
-                                    }),
-                                    store: wgpu::StoreOp::Store,
-                                },
-                            })],
-                            depth_stencil_attachment: None,
-                            occlusion_query_set: None,
-                            timestamp_writes: None,
-                        });
-
-                        // Render ImGui draw commands into the current frame.
-                        if let Err(err) = renderer.render(draw_data, &queue, &device, &mut rpass) {
-                            log::error!("imgui render failed: {err}");
-                        }
-                    }
-
-                    // Submit GPU commands and present the frame to the screen.
-                    queue.submit(Some(encoder.finish()));
-                    frame.present();
                 }
                 // Other window events for our window (close, resize, keyboard, etc.).
                 Event::WindowEvent { window_id, event } if window_id == window.id() => {
@@ -594,13 +482,121 @@ fn main() -> anyhow::Result<()> {
                                 window.request_redraw();
                             }
                         }
+                        // Handle actual drawing when the window says it needs a redraw.
+                        WindowEvent::RedrawRequested => {
+                            let frame = match surface.get_current_texture() {
+                                Ok(frame) => frame,
+                                Err(SurfaceError::Lost) | Err(SurfaceError::Outdated) => {
+                                    surface.configure(&device, &surface_config);
+                                    return;
+                                }
+                                Err(SurfaceError::OutOfMemory) => {
+                                    log::error!("Surface out of memory; exiting");
+                                    cleanup_on_exit(
+                                        &app_state,
+                                        &mut image_manager,
+                                        &mut image_uploader,
+                                        &mut texture_atlas,
+                                        &mut imgui_textures,
+                                        &mut app_resources,
+                                        &mut renderer,
+                                    );
+                                    window_target.exit();
+                                    return;
+                                }
+                                Err(SurfaceError::Timeout) => {
+                                    return;
+                                }
+                                Err(SurfaceError::Other) => {
+                                    log::warn!(
+                                        "Surface returned an unspecified error; retrying next frame"
+                                    );
+                                    return;
+                                }
+                            };
+
+                            // Create view into the current frame's texture.
+                            let view = frame
+                                .texture
+                                .create_view(&wgpu::TextureViewDescriptor::default());
+
+                            // Build ImGui UI for this frame.
+                            let ui = imgui.frame();
+                            let mut running = true;
+                            // Clone to avoid moving out of the closure-captured option.
+                            render_ui(
+                                ui,
+                                &mut app_state,
+                                current_texture.as_ref(),
+                                &app_resources,
+                                &mut running,
+                            );
+
+                            if !running {
+                                // exit
+                                cleanup_on_exit(
+                                    &app_state,
+                                    &mut image_manager,
+                                    &mut image_uploader,
+                                    &mut texture_atlas,
+                                    &mut imgui_textures,
+                                    &mut app_resources,
+                                    &mut renderer,
+                                );
+                                window_target.exit();
+                                return;
+                            }
+
+                            // Tell ImGui/winit helper we are ready to render.
+                            platform.prepare_render(ui, window.as_ref());
+                            // Get draw lists from ImGui.
+                            let draw_data = imgui.render();
+
+                            let mut encoder =
+                                device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                                    label: Some("image-viewer encoder"),
+                                });
+
+                            {
+                                // Begin a render pass to clear screen and draw ImGui.
+                                let mut rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                                    label: Some("image-viewer render pass"),
+                                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                                        view: &view,
+                                        resolve_target: None,
+                                        ops: wgpu::Operations {
+                                            load: wgpu::LoadOp::Clear(wgpu::Color {
+                                                r: 0.08,
+                                                g: 0.09,
+                                                b: 0.11,
+                                                a: 1.0,
+                                            }),
+                                            store: wgpu::StoreOp::Store,
+                                        },
+                                    })],
+                                    depth_stencil_attachment: None,
+                                    occlusion_query_set: None,
+                                    timestamp_writes: None,
+                                });
+
+                                // Render ImGui draw commands into the current frame.
+                                if let Err(err) = renderer.render(draw_data, &queue, &device, &mut rpass) {
+                                    log::error!("imgui render failed: {err}");
+                                }
+                            }
+
+                            // Submit GPU commands and present the frame to the screen.
+                            queue.submit(Some(encoder.finish()));
+                            frame.present();
+                        }
                         _ => {}
                     }
                 }
                 _ => {}
             }
         })
-        .map_err(anyhow::Error::msg)
+    })
+    .map_err(anyhow::Error::msg)
 }
 
 fn create_surface_config(
