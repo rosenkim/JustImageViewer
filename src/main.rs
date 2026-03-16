@@ -16,8 +16,8 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::task::block_in_place;
-use wgpu::{Backends, Device, Instance, InstanceDescriptor};
-use wgpu::{CompositeAlphaMode, Queue, Surface, SurfaceConfiguration, SurfaceError};
+use wgpu::{Backends, Instance, InstanceDescriptor};
+use wgpu::{CompositeAlphaMode, Surface, SurfaceConfiguration, SurfaceError};
 use winit::{
     dpi::LogicalSize,
     event::{ElementState, Event, WindowEvent},
@@ -364,15 +364,41 @@ async fn main() -> anyhow::Result<()> {
 
                     // Reload current image/texture if someone requested it.
                     if app_state.take_reload_request() {
-                        current_texture = refresh_current_texture(
-                            &mut app_state,
-                            &device,
-                            &queue,
-                            &mut renderer,
-                            &mut image_uploader,
-                            &mut imgui_textures,
-                            &mut image_manager,
-                        );
+                        if let Some(entry) = app_state.current_entry() {
+                            // Fast path: texture already cached in GPU.
+                            if let Some(cached) = image_uploader.get_cached(&entry.path) {
+                                current_texture = Some(cached);
+                            } else {
+                                // Slow path: kick off background decode.
+                                image_uploader.request_decode(&entry.path, &mut image_manager);
+                            }
+                        } else {
+                            // No image selected (e.g. directory changed). Cancel any stale decode.
+                            image_uploader.cancel_pending();
+                            current_texture = None;
+                        }
+                    }
+
+                    // Poll background decode result and upload to GPU when ready.
+                    if let Some((decoded_path, uploaded)) = image_uploader.poll_decoded(
+                        &device,
+                        &queue,
+                        &mut renderer,
+                        &mut imgui_textures,
+                        &mut image_manager,
+                    ) {
+                        // Only apply if the decoded image still matches the current selection.
+                        let is_current = app_state
+                            .current_entry()
+                            .map_or(false, |e| e.path == decoded_path);
+                        if is_current {
+                            current_texture = Some(uploaded);
+                        } else {
+                            log::debug!(
+                                "Discarding stale decode result: {}",
+                                decoded_path.display()
+                            );
+                        }
                     }
 
                     // Prepare ImGui frame (may fail if window is minimized, etc.).
@@ -680,40 +706,6 @@ fn restore_last_directory_if_needed(app_state: &mut ViewerState) {
     }
 }
 
-/// Decode selected image and make sure we have a usable GPU texture.
-fn refresh_current_texture(
-    app_state: &mut ViewerState,
-    device: &Device,
-    queue: &Queue,
-    renderer: &mut imgui_wgpu::Renderer,
-    image_uploader: &mut ImageUploader,
-    imgui_textures: &mut ImguiTextures,
-    image_manager: &mut ImageManager,
-) -> Option<UploadedTexture> {
-    let Some(entry) = app_state.current_entry() else {
-        return None;
-    };
-
-    match image_uploader.get_or_upload(
-        &entry.path,
-        &entry,
-        device,
-        queue,
-        renderer,
-        imgui_textures,
-        image_manager,
-    ) {
-        Ok(uploaded) => Some(uploaded),
-        Err(err) => {
-            log::error!(
-                "Texture upload failed for {}: {:#}",
-                entry.path.display(),
-                err
-            );
-            None
-        }
-    }
-}
 
 fn load_window_icon() -> Option<Icon> {
     // 런타임 파일로 로드해도 되고, 배포 편하게 include_bytes!로 박아도 됨.
