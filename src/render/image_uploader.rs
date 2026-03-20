@@ -24,6 +24,8 @@ pub struct UploadedTexture {
     pub id: TextureId,
     pub width: usize,
     pub height: usize,
+    /// RGBA pixel data (row-major, 4 bytes per pixel).
+    pub pixels: Arc<[u8]>,
 }
 
 struct TextureRecord {
@@ -31,6 +33,8 @@ struct TextureRecord {
     width: usize,
     height: usize,
     last_used: u32,
+    /// RGBA pixel data retained for clipboard copy operations.
+    pixels: Arc<[u8]>,
 }
 
 /// Successful decode result from the background thread.
@@ -80,6 +84,7 @@ impl ImageUploader {
             id: existing.texture_id,
             width: existing.width,
             height: existing.height,
+            pixels: existing.pixels.clone(),
         })
     }
 
@@ -225,16 +230,19 @@ impl ImageUploader {
             width: decoded.width,
             height: decoded.height,
             last_used: self.access_counter,
+            pixels: decoded.pixels.clone(),
         };
 
         let result_path = path.clone();
-        self.textures.insert(path, record);
-
-        Some((result_path, UploadedTexture {
+        let uploaded = UploadedTexture {
             id: texture_id,
             width: decoded.width,
             height: decoded.height,
-        }))
+            pixels: decoded.pixels,
+        };
+        self.textures.insert(path, record);
+
+        Some((result_path, uploaded))
     }
 
     /// Returns true if there is a background decode in progress.

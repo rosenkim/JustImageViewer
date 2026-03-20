@@ -20,6 +20,7 @@ pub fn render_ui(
     ui: &imgui::Ui,
     app_state: &mut ViewerState,
     current_texture: Option<&UploadedTexture>,
+    is_pending: bool,
     app_resources: &AppResources,
     running: &mut bool,
 ) {
@@ -216,6 +217,8 @@ pub fn render_ui(
                                 render_image_selection_widget(
                                     ui,
                                     app_state,
+                                    Some(texture),
+                                    is_pending,
                                     view_panel_min,
                                     view_panel_max,
                                     ui.item_rect_min(),

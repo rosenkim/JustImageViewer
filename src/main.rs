@@ -554,6 +554,7 @@ async fn main() -> anyhow::Result<()> {
                                 ui,
                                 &mut app_state,
                                 current_texture.as_ref(),
+                                image_uploader.is_pending(),
                                 &app_resources,
                                 &mut running,
                             );
