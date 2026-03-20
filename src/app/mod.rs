@@ -98,6 +98,8 @@ pub struct ViewerState {
     library_sort_field: LibrarySortField,
     sort_direction: SortDirection,
     show_thumbnail: bool,
+    pending_library_scroll_to_selection: bool,
+    pending_library_scroll_direction: i32,
     image_selection: Option<Rect2D>,
     image_selection_drag_start: Option<[f32; 2]>,
     image_selection_drag_mode: Option<ImageSelectionDragMode>,
@@ -153,6 +155,8 @@ impl ViewerState {
             library_sort_field,
             sort_direction,
             show_thumbnail,
+            pending_library_scroll_to_selection: false,
+            pending_library_scroll_direction: 0,
             image_selection: None,
             image_selection_drag_start: None,
             image_selection_drag_mode: None,
@@ -348,7 +352,26 @@ impl ViewerState {
         if next != current {
             self.current_index = Some(next);
             self.needs_image_reload = true;
+            self.pending_library_scroll_to_selection = true;
+            self.pending_library_scroll_direction = delta.signum();
             self.clear_image_selection_state();
+        }
+    }
+
+    pub fn take_pending_library_scroll_to_selection(&mut self) -> Option<i32> {
+        if !self.pending_library_scroll_to_selection {
+            return None;
+        }
+
+        let pending = self.pending_library_scroll_to_selection;
+        let direction = self.pending_library_scroll_direction;
+        self.pending_library_scroll_to_selection = false;
+        self.pending_library_scroll_direction = 0;
+
+        if pending {
+            Some(direction)
+        } else {
+            None
         }
     }
 

@@ -125,6 +125,8 @@ pub fn render_ui(
                         ui.child_window("library_scroll")
                             .size([0.0, -36.0])
                             .build(|| {
+                                let mut pending_scroll_direction =
+                                    app_state.take_pending_library_scroll_to_selection();
                                 // render file list
                                 for (index, entry) in app_state.media_items().iter().enumerate() {
                                     if render_library_item_row(
@@ -135,6 +137,22 @@ pub fn render_ui(
                                         entry,
                                     ) {
                                         clicked_index = Some(index);
+                                    }
+
+                                    if app_state.current_index() == Some(index)
+                                        && let Some(direction) = pending_scroll_direction
+                                    {
+                                        if !ui.is_item_visible() {
+                                            let ratio = if direction < 0 {
+                                                0.2
+                                            } else if direction > 0 {
+                                                0.8
+                                            } else {
+                                                0.5
+                                            };
+                                            ui.set_scroll_here_y_with_ratio(ratio);
+                                        }
+                                        pending_scroll_direction = None;
                                     }
                                 }
                             });
