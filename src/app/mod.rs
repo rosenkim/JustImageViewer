@@ -675,6 +675,7 @@ impl ViewerState {
     }
 
     pub fn set_current_texture(&mut self, texture: Option<UploadedTexture>) {
+        self.current_image_size = texture.as_ref().map(|t| (t.width, t.height));
         self.current_texture = texture;
     }
 
