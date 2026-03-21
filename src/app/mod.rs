@@ -12,6 +12,7 @@ use crate::{
     core::media::{self, MediaEntry, ThumbnailInfo},
     infra::config::AppConfig,
     render::{
+        image_uploader::UploadedTexture,
         imgui_textures::ImguiTextures,
         texture_atlas_manager::TextureAtlasManager,
     },
@@ -104,6 +105,8 @@ pub struct ViewerState {
     image_selection_drag_start: Option<[f32; 2]>,
     image_selection_drag_mode: Option<ImageSelectionDragMode>,
 
+    current_texture: Option<UploadedTexture>,
+
     worker_handles: Vec<tokio::task::JoinHandle<()>>,
     thumbnail_tx: Option<mpsc::Sender<ThumbnailResult>>,
     thumbnail_rx: Option<mpsc::Receiver<ThumbnailResult>>,
@@ -160,6 +163,8 @@ impl ViewerState {
             image_selection: None,
             image_selection_drag_start: None,
             image_selection_drag_mode: None,
+
+            current_texture: None,
 
             worker_handles: Vec::new(),
             thumbnail_tx: None,
@@ -665,6 +670,14 @@ impl ViewerState {
         requested
     }
 
+    pub fn current_texture(&self) -> Option<&UploadedTexture> {
+        self.current_texture.as_ref()
+    }
+
+    pub fn set_current_texture(&mut self, texture: Option<UploadedTexture>) {
+        self.current_texture = texture;
+    }
+
     fn sort_media_items(&mut self) {
         let selected_path = self.current_entry().map(|entry| entry.path.clone());
         let sort_direction = self.sort_direction;
@@ -697,6 +710,10 @@ impl ViewerState {
                 .position(|entry| &entry.path == target)
         });
     }
+
+    pub fn copy_region_to_clipboard(&self, selection: Option<Rect2D>) {
+        crate::core::helper::copy_region_to_clipboard(selection, self.current_texture.as_ref());
+    }
 }
 
 pub fn format_file_size(bytes: u64) -> String {
@@ -715,3 +732,4 @@ pub fn format_file_size(bytes: u64) -> String {
         format!("{value:.1} {}", UNITS[unit_index])
     }
 }
+

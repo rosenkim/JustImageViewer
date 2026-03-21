@@ -30,7 +30,7 @@ use crate::core::image_manager::ImageManager;
 use crate::render::app_resources::AppResources;
 use crate::render::imgui_textures::ImguiTextures;
 use crate::render::texture_atlas_manager::TextureAtlasManager;
-use crate::render::image_uploader::{ImageUploader, UploadedTexture};
+use crate::render::image_uploader::ImageUploader;
 use crate::ui::render_ui;
 
 const FOCUSED_FPS: u32 = 60;
@@ -320,8 +320,6 @@ async fn main() -> anyhow::Result<()> {
         image_cache_count
     );
 
-    let mut current_texture: Option<UploadedTexture> = None;
-
     let mut last_frame = Instant::now();
     let mut modifiers = ModifiersState::default();
     let mut is_window_focused = true;
@@ -367,7 +365,7 @@ async fn main() -> anyhow::Result<()> {
                         if let Some(entry) = app_state.current_entry() {
                             // Fast path: texture already cached in GPU.
                             if let Some(cached) = image_uploader.get_cached(&entry.path) {
-                                current_texture = Some(cached);
+                                app_state.set_current_texture(Some(cached));
                             } else {
                                 // Slow path: kick off background decode.
                                 image_uploader.request_decode(&entry.path, &mut image_manager);
@@ -375,7 +373,7 @@ async fn main() -> anyhow::Result<()> {
                         } else {
                             // No image selected (e.g. directory changed). Cancel any stale decode.
                             image_uploader.cancel_pending();
-                            current_texture = None;
+                            app_state.set_current_texture(None);
                         }
                     }
 
@@ -392,7 +390,7 @@ async fn main() -> anyhow::Result<()> {
                             .current_entry()
                             .map_or(false, |e| e.path == decoded_path);
                         if is_current {
-                            current_texture = Some(uploaded);
+                            app_state.set_current_texture(Some(uploaded));
                         } else {
                             log::debug!(
                                 "Discarding stale decode result: {}",
@@ -553,7 +551,6 @@ async fn main() -> anyhow::Result<()> {
                             render_ui(
                                 ui,
                                 &mut app_state,
-                                current_texture.as_ref(),
                                 image_uploader.is_pending(),
                                 &app_resources,
                                 &mut running,

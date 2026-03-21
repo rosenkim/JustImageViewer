@@ -2,7 +2,6 @@ use crate::app::{ImageViewMode, LibrarySortField, SortDirection, ViewerState, fo
 use crate::core::media::MediaEntry;
 use crate::math::{Point2D, Rect2D};
 use crate::render::app_resources::AppResources;
-use crate::render::image_uploader::UploadedTexture;
 use imgui::{Condition, MouseCursor, StyleVar, TableFlags, Ui};
 
 use super::helper::render_image_selection_widget;
@@ -19,7 +18,6 @@ const MIN_SELECTION_SIZE: f32 = 1.0;
 pub fn render_ui(
     ui: &imgui::Ui,
     app_state: &mut ViewerState,
-    current_texture: Option<&UploadedTexture>,
     is_pending: bool,
     app_resources: &AppResources,
     running: &mut bool,
@@ -196,7 +194,7 @@ pub fn render_ui(
                         .size([0.0, -metadata_height])
                         .flags(imgui::WindowFlags::HORIZONTAL_SCROLLBAR)
                         .build(|| {
-                            if let Some(texture) = current_texture {
+                            if let Some(ref texture) = app_state.current_texture() {
                                 let avail = ui.content_region_avail();
                                 let fb_scale = ui.io().display_framebuffer_scale[0];
                                 let width_scale = avail[0] / texture.width as f32;
@@ -235,7 +233,6 @@ pub fn render_ui(
                                 render_image_selection_widget(
                                     ui,
                                     app_state,
-                                    Some(texture),
                                     is_pending,
                                     view_panel_min,
                                     view_panel_max,
