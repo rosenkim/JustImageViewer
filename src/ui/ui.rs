@@ -25,8 +25,9 @@ pub fn render_ui(
     render_main_menu_bar(ui, app_state, running);
 
     let display = ui.io().display_size;
-    let menu_height = ui.io().font_global_scale * 20.0;
-    let status_height = 28.0;
+    // Use current frame metrics so layout follows the real font size.
+    let menu_height = ui.frame_height_with_spacing();
+    let status_height = ui.frame_height_with_spacing() + 6.0;
     let content_height = (display[1] - menu_height - status_height).max(120.0);
     let window_flags = imgui::WindowFlags::NO_MOVE
         | imgui::WindowFlags::NO_RESIZE

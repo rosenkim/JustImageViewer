@@ -35,6 +35,8 @@ use crate::ui::render_ui;
 
 const FOCUSED_FPS: u32 = 60;
 const UNFOCUSED_FPS: u32 = 5;
+const LOGICAL_DPI: f32 = 96.0;
+const POINTS_PER_INCH: f32 = 72.0;
 
 #[derive(Debug, Default)]
 struct AppArgs {
@@ -45,6 +47,18 @@ struct AppArgs {
 fn frame_interval_from_fps(fps: u32) -> Duration {
     debug_assert!(fps > 0);
     Duration::from_secs_f64(1.0 / f64::from(fps))
+}
+
+fn points_to_logical_pixels(points: f32) -> f32 {
+    points * (LOGICAL_DPI / POINTS_PER_INCH)
+}
+
+fn compute_font_global_scale(ui_scale_factor: f32, hidpi_factor: f32) -> f32 {
+    if hidpi_factor > 0.0 {
+        ui_scale_factor / hidpi_factor
+    } else {
+        ui_scale_factor
+    }
 }
 
 fn parse_args() -> anyhow::Result<AppArgs> {
@@ -150,7 +164,7 @@ async fn main() -> anyhow::Result<()> {
             force_fallback_adapter: false,
         })
         .await
-    .context("failed to request wgpu adapter")?;
+        .context("failed to request wgpu adapter")?;
 
     let adapter_limits = adapter.limits();
 
@@ -167,7 +181,7 @@ async fn main() -> anyhow::Result<()> {
             trace: wgpu::Trace::Off,
         })
         .await
-    .context("failed to request wgpu device")?;
+        .context("failed to request wgpu device")?;
 
     let mut surface_config = create_surface_config(&surface, &adapter, window.inner_size())
         .context("failed to configure surface")?;
@@ -178,14 +192,14 @@ async fn main() -> anyhow::Result<()> {
     imgui.style_mut().use_dark_colors();
 
     let ui_font_filename = app_state.config().ui_font_filename.clone();
-    let ui_font_size_pixels = if app_state.config().ui_font_size_pixels > 0.0 {
-        app_state.config().ui_font_size_pixels
+    let ui_font_size_pt = if app_state.config().ui_font_size_pt > 0.0 {
+        app_state.config().ui_font_size_pt
     } else {
         log::warn!(
-            "Invalid ui_font_size_pixels ({}). Falling back to 14.0",
-            app_state.config().ui_font_size_pixels
+            "Invalid ui_font_size_pt ({}). Falling back to 10.5",
+            app_state.config().ui_font_size_pt
         );
-        14.0
+        10.5
     };
 
     let ui_scale_factor = if app_state.config().ui_scale_factor > 0.0 {
@@ -202,22 +216,16 @@ async fn main() -> anyhow::Result<()> {
     platform.attach_window(imgui.io_mut(), window.as_ref(), HiDpiMode::Default);
 
     let hidpi_factor = window.scale_factor() as f32;
-    let font_scale = if hidpi_factor > 0.0 {
-        if (hidpi_factor - 1.0).abs() > f32::EPSILON {
-            ui_scale_factor / hidpi_factor
-        } else {
-            ui_scale_factor
-        }
-    } else {
-        ui_scale_factor
-    };
+    let font_scale = compute_font_global_scale(ui_scale_factor, hidpi_factor);
+    let ui_font_size_logical_px = points_to_logical_pixels(ui_font_size_pt);
 
     imgui.io_mut().font_global_scale = font_scale;
     log::info!(
-        "Detected DPI scale: {:.2}, ui_scale_factor: {:.2}, effective font_global_scale: {:.2}",
+        "Detected DPI scale: {:.2}, ui_scale_factor: {:.2}, effective font_global_scale: {:.2}, ui_font_size_pt: {:.2}",
         hidpi_factor,
         ui_scale_factor,
-        font_scale
+        font_scale,
+        ui_font_size_pt
     );
 
     // Load custom font from:
@@ -245,7 +253,9 @@ async fn main() -> anyhow::Result<()> {
         // Leak the data so it lives for the entire program lifetime.
         // imgui requires the font data slice to live as long as the context.
         let font_data: &'static [u8] = Box::leak(font_data.into_boxed_slice());
-        let font_size = ui_font_size_pixels * hidpi_factor.max(1.0);
+        // Convert pt -> logical px (96 DPI) -> framebuffer px.
+        // This keeps font sizing stable across font changes and DPI.
+        let font_size = ui_font_size_logical_px * hidpi_factor.max(1.0);
 
         imgui.fonts().add_font(&[FontSource::TtfData {
             data: font_data,
@@ -264,9 +274,11 @@ async fn main() -> anyhow::Result<()> {
             }),
         }]);
         log::info!(
-            "Custom font loaded: {} ({} px, scale: {:.2})",
+            "Custom font loaded: {} ({:.2} pt -> {:.2} logical px -> {:.2} framebuffer px, scale: {:.2})",
             font_path.display(),
-            ui_font_size_pixels * hidpi_factor.max(1.0),
+            ui_font_size_pt,
+            ui_font_size_logical_px,
+            font_size,
             hidpi_factor
         );
     } else {
@@ -487,7 +499,8 @@ async fn main() -> anyhow::Result<()> {
                         WindowEvent::ScaleFactorChanged { scale_factor, .. } => {
                             if scale_factor > 0.0 {
                                 // Keep ImGui UI size visually similar after DPI change.
-                                imgui.io_mut().font_global_scale = 1.0 / scale_factor as f32;
+                                imgui.io_mut().font_global_scale =
+                                    compute_font_global_scale(ui_scale_factor, scale_factor as f32);
                             }
                             let new_size = window.inner_size();
                             if new_size.width > 0 && new_size.height > 0 {
@@ -583,28 +596,33 @@ async fn main() -> anyhow::Result<()> {
 
                             {
                                 // Begin a render pass to clear screen and draw ImGui.
-                                let mut rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                                    label: Some("image-viewer render pass"),
-                                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                                        view: &view,
-                                        resolve_target: None,
-                                        ops: wgpu::Operations {
-                                            load: wgpu::LoadOp::Clear(wgpu::Color {
-                                                r: 0.08,
-                                                g: 0.09,
-                                                b: 0.11,
-                                                a: 1.0,
-                                            }),
-                                            store: wgpu::StoreOp::Store,
-                                        },
-                                    })],
-                                    depth_stencil_attachment: None,
-                                    occlusion_query_set: None,
-                                    timestamp_writes: None,
-                                });
+                                let mut rpass =
+                                    encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                                        label: Some("image-viewer render pass"),
+                                        color_attachments: &[Some(
+                                            wgpu::RenderPassColorAttachment {
+                                                view: &view,
+                                                resolve_target: None,
+                                                ops: wgpu::Operations {
+                                                    load: wgpu::LoadOp::Clear(wgpu::Color {
+                                                        r: 0.08,
+                                                        g: 0.09,
+                                                        b: 0.11,
+                                                        a: 1.0,
+                                                    }),
+                                                    store: wgpu::StoreOp::Store,
+                                                },
+                                            },
+                                        )],
+                                        depth_stencil_attachment: None,
+                                        occlusion_query_set: None,
+                                        timestamp_writes: None,
+                                    });
 
                                 // Render ImGui draw commands into the current frame.
-                                if let Err(err) = renderer.render(draw_data, &queue, &device, &mut rpass) {
+                                if let Err(err) =
+                                    renderer.render(draw_data, &queue, &device, &mut rpass)
+                                {
                                     log::error!("imgui render failed: {err}");
                                 }
                             }
@@ -703,7 +721,6 @@ fn restore_last_directory_if_needed(app_state: &mut ViewerState) {
         }
     }
 }
-
 
 fn load_window_icon() -> Option<Icon> {
     // 런타임 파일로 로드해도 되고, 배포 편하게 include_bytes!로 박아도 됨.

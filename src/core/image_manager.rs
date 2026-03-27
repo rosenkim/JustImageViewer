@@ -65,14 +65,16 @@ impl ImageManager {
         }
         self.evict_if_full();
         self.access_counter += 1;
-        self.binary_cache.insert(path, CachedImage {
-            binary: Arc::new(binary),
-            last_used: self.access_counter,
-        });
+        self.binary_cache.insert(
+            path,
+            CachedImage {
+                binary: Arc::new(binary),
+                last_used: self.access_counter,
+            },
+        );
     }
 
     pub fn clear(&mut self) {
         self.binary_cache.clear();
     }
 }
-

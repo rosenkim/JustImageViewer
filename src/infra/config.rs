@@ -13,6 +13,8 @@ const QUALIFIER: &str = "dev";
 const ORGANIZATION: &str = "Vibe";
 const APPLICATION: &str = "ImageViewer";
 const CONFIG_FILENAME: &str = "settings.toml";
+const LOGICAL_DPI: f32 = 96.0;
+const POINTS_PER_INCH: f32 = 72.0;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
@@ -22,7 +24,8 @@ pub struct AppConfig {
     #[serde(alias = "last_open_folder")]
     pub last_open_directory: Option<PathBuf>,
     pub ui_font_filename: String,
-    pub ui_font_size_pixels: f32,
+    #[serde(alias = "ui_font_size_pixels")]
+    pub ui_font_size_pt: f32,
     pub ui_scale_factor: f32,
     pub background_style: BackgroundStyle,
     pub image_cache_count: usize,
@@ -44,7 +47,8 @@ impl Default for AppConfig {
             restore_last_directory: true,
             last_open_directory: None,
             ui_font_filename: String::new(),
-            ui_font_size_pixels: 14.0,
+            // 10.5pt maps to about 14px at 96 DPI.
+            ui_font_size_pt: 10.5,
             ui_scale_factor: 1.0,
             background_style: BackgroundStyle::default(),
             image_cache_count: 32,
@@ -125,12 +129,28 @@ pub fn load_or_create(reset_config: bool) -> Result<ConfigHandle> {
         )
     })?;
 
-    let settings: AppConfig = toml::from_str(&raw).with_context(|| {
+    let mut settings: AppConfig = toml::from_str(&raw).with_context(|| {
         format!(
             "failed to parse configuration file {}",
             config_path.display()
         )
     })?;
+
+    // Backward-compatibility migration:
+    // Old config used `ui_font_size_pixels`. Convert that value to pt.
+    if let Ok(raw_value) = raw.parse::<toml::Value>() {
+        let has_pt_key = raw_value.get("ui_font_size_pt").is_some();
+        if !has_pt_key {
+            if let Some(old_px) = raw_value
+                .get("ui_font_size_pixels")
+                .and_then(toml_number_to_f32)
+            {
+                if old_px > 0.0 {
+                    settings.ui_font_size_pt = old_px * (POINTS_PER_INCH / LOGICAL_DPI);
+                }
+            }
+        }
+    }
 
     Ok(ConfigHandle {
         settings,
@@ -161,4 +181,12 @@ pub fn save(path: &Path, settings: &AppConfig) -> Result<()> {
 
 fn default_template() -> &'static str {
     include_str!("../../config/default_settings.toml")
+}
+
+fn toml_number_to_f32(value: &toml::Value) -> Option<f32> {
+    if let Some(v) = value.as_float() {
+        return Some(v as f32);
+    }
+
+    value.as_integer().map(|v| v as f32)
 }
