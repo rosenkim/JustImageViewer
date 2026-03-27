@@ -21,6 +21,7 @@ toml = "0.8"
 guillotiere = "0.6"
 tokio = { version = "1.50", features = ["full"] }
 arboard = "3.6"
+chrono = "0.4"
 
 [build-dependencies]
 winres = "0.1"

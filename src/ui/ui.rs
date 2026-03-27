@@ -2,7 +2,9 @@ use crate::app::{ImageViewMode, LibrarySortField, SortDirection, ViewerState, fo
 use crate::core::media::MediaEntry;
 use crate::math::{Point2D, Rect2D};
 use crate::render::app_resources::AppResources;
+use chrono::{DateTime, Local, Utc};
 use imgui::{Condition, MouseCursor, StyleVar, TableFlags, Ui};
+use std::time::Duration;
 
 use super::helper::render_image_selection_widget;
 use super::keyboard_shortcuts_window::render_keyboard_shortcuts_window;
@@ -493,13 +495,14 @@ fn render_library_item_row(
         ui.same_line();
 
         let dimensions_text = match entry.dimensions {
-            Some((width, height)) => format!("{width} x {height}"),
-            None => "Unknown x Unknown".to_owned(),
+            Some((width, height)) => format!("- {width} x {height}"),
+            None => "- Unknown x Unknown".to_owned(),
         };
-        // Show file name + resolution as two lines in one selectable row.
+        let modified_date_text = format_modified_date("- ", entry.modified_time);
+        // Show file name + resolution + modified date in one selectable row.
         let selectable_label = format!(
-            "{}\n{}##library_item_{index}",
-            entry.file_name, dimensions_text
+            "{}\n{}\n{}##library_item_{index}",
+            entry.file_name, dimensions_text, modified_date_text
         );
         return ui
             .selectable_config(&selectable_label)
@@ -523,6 +526,21 @@ fn property_grid_float_row(ui: &Ui, name: &str, id: &str, value: &mut f32) -> bo
     ui.table_next_column();
     ui.set_next_item_width(-1.0);
     ui.input_float(id, value).display_format("%.1f").build()
+}
+
+fn format_modified_date(prefix: &str, modified_time: Duration) -> String {
+
+    let Ok(seconds) = i64::try_from(modified_time.as_secs()) else {
+        return format!("{}Unknown", prefix);
+    };
+
+    // Convert unix seconds to local time text for list UI.
+    let Some(utc_time) = DateTime::<Utc>::from_timestamp(seconds, 0) else {
+        return format!("{}Unknown", prefix);
+    };
+
+    let local_time = utc_time.with_timezone(&Local);
+    format!("{}{}", prefix, local_time.format("%Y-%m-%d %H:%M"))
 }
 
 fn clamp_selection_rect_to_image(rect: Rect2D, image_size: [f32; 2]) -> Rect2D {
