@@ -457,9 +457,13 @@ async fn main() -> anyhow::Result<()> {
                         WindowEvent::ModifiersChanged(new_modifiers) => {
                             modifiers = new_modifiers.state();
                         }
-                        // Handle key presses (no auto-repeat).
+                        // Handle key presses (no auto-repeat, only when main window is focused and no popup is open).
                         WindowEvent::KeyboardInput { event, .. }
-                            if event.state == ElementState::Pressed && !event.repeat =>
+                            if event.state == ElementState::Pressed
+                                && !event.repeat
+                                && is_window_focused
+                                && !app_state.show_keyboard_shortcuts()
+                                && !app_state.show_selection_window() =>
                         {
                             match event.physical_key {
                                 // ESC clears current image selection.
