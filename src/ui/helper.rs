@@ -197,6 +197,7 @@ pub fn render_image_selection_widget(
                 }
             }
             app_state.clear_image_selection_drag();
+            app_state.set_image_selection(Some(floor_selection(app_state.image_selection().unwrap())));
         }
     }
 
@@ -309,6 +310,19 @@ fn cursor_for_resize_handle(handle: ImageSelectionResizeHandle) -> MouseCursor {
         ImageSelectionResizeHandle::TopRight | ImageSelectionResizeHandle::BottomLeft => {
             MouseCursor::ResizeNESW
         }
+    }
+}
+
+fn floor_selection(selection: Rect2D) -> Rect2D {
+    Rect2D {
+        min: Point2D {
+            x: selection.min.x.floor(),
+            y: selection.min.y.floor(),
+        },
+        max: Point2D {
+            x: selection.max.x.floor(),
+            y: selection.max.y.floor(),
+        },
     }
 }
 
@@ -469,8 +483,7 @@ fn render_selection_popup(
                 .build()
             {
                 if item.name == "Copy" {
-                    let selection = app_state.image_selection();
-                    app_state.copy_region_to_clipboard(selection);
+                    app_state.copy_region_to_clipboard(None);
                 }
                 ui.close_current_popup();
                 break;

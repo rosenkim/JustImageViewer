@@ -713,6 +713,7 @@ impl ViewerState {
     }
 
     pub fn copy_region_to_clipboard(&self, selection: Option<Rect2D>) {
+        let selection = selection.or_else(|| self.image_selection());
         crate::core::helper::copy_region_to_clipboard(selection, self.current_texture.as_ref());
     }
 }

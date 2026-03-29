@@ -264,20 +264,6 @@ pub fn render_ui(
         .build(|| {
             ui.text(format!("Status: {}", app_state.status_message()));
             ui.same_line();
-            ui.text("|");
-            ui.same_line();
-            ui.text(format!("Config: {}", app_state.config_path().display()));
-            ui.same_line();
-            ui.text("|");
-            ui.same_line();
-            ui.text(format!(
-                "Restore last directory: {}",
-                if app_state.restore_last_directory() {
-                    "on"
-                } else {
-                    "off"
-                }
-            ));
         });
 
     if app_state.show_keyboard_shortcuts() {
@@ -368,11 +354,8 @@ pub fn render_file_info(ui: &imgui::Ui, app_state: &ViewerState) {
     ui.separator();
     if let Some(entry) = app_state.current_entry() {
         ui.text(format!("File: {}", entry.file_name));
-        ui.text(format!(
-            "Format: {}  Size: {}",
-            entry.format.as_str(),
-            format_file_size(entry.file_size)
-        ));
+        ui.text(format!("Format: {}", entry.format.as_str()));
+        ui.text(format!("Size: {}", format_file_size(entry.file_size)));
         if let Some((w, h)) = app_state.current_image_size() {
             ui.text(format!("Resolution: {} x {}", w, h));
         }
@@ -391,16 +374,13 @@ fn render_selection_window(ui: &Ui, app_state: &mut ViewerState) {
         .opened(&mut open)
         .size([360.0, 280.0], Condition::FirstUseEver)
         .build(|| {
-            ui.text("Image Coordinate System");
-            ui.separator();
-
             let Some((image_w, image_h)) = app_state.current_image_size() else {
                 ui.text("No image loaded.");
                 return;
             };
 
             ui.text(format!("Image Size: {} x {}", image_w, image_h));
-            ui.separator();
+            ui.spacing();
 
             let Some(selection) = app_state.image_selection() else {
                 ui.text("No selection.");
@@ -411,9 +391,10 @@ fn render_selection_window(ui: &Ui, app_state: &mut ViewerState) {
             let mut edited = selection;
             let mut changed = false;
             let table_flags = TableFlags::BORDERS
-                | TableFlags::ROW_BG
                 | TableFlags::SIZING_STRETCH_PROP
                 | TableFlags::NO_SAVED_SETTINGS;
+
+            ui.dummy([0.0, 8.0]);
 
             if let Some(_table) =
                 ui.begin_table_with_flags("selection_property_grid", 2, table_flags)
@@ -446,11 +427,19 @@ fn render_selection_window(ui: &Ui, app_state: &mut ViewerState) {
                 app_state.set_image_selection(Some(clamped));
             }
 
-            ui.separator();
-            if ui.button("Clear Selection") {
-                app_state.clear_image_selection_state();
+
+            ui.dummy([0.0, 8.0]);
+            if app_state.image_selection().is_some() {
+                let _pad = ui.push_style_var(StyleVar::ItemSpacing([4.0, 4.0]));
+                if ui.button("Copy to Clipboard") {
+                    app_state.copy_region_to_clipboard(None);
+                }
+
+                if ui.button("Clear Selection") {
+                    app_state.clear_image_selection_state();
+                }
             }
-        });
+    });
 
     app_state.set_show_selection_window(open);
 }
