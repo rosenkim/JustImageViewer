@@ -197,7 +197,9 @@ pub fn render_image_selection_widget(
                 }
             }
             app_state.clear_image_selection_drag();
-            app_state.set_image_selection(Some(floor_selection(app_state.image_selection().unwrap())));
+            if let Some(selection) = app_state.image_selection() {
+                app_state.set_image_selection(Some(floor_selection(selection)));
+            }
         }
     }
 
