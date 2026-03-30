@@ -39,6 +39,7 @@ pub struct AppConfig {
     pub library_sort_field: LibrarySortField,
     pub sort_direction: SortDirection,
     pub show_thumbnail: bool,
+    pub show_grid_view: bool,
 }
 
 impl Default for AppConfig {
@@ -61,6 +62,7 @@ impl Default for AppConfig {
             library_sort_field: LibrarySortField::Name,
             sort_direction: SortDirection::Ascending,
             show_thumbnail: true,
+            show_grid_view: false,
         }
     }
 }

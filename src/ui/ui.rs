@@ -14,7 +14,8 @@ const MIN_LIBRARY_WIDTH: f32 = 220.0;
 const MIN_VIEWER_WIDTH: f32 = 280.0;
 const LIBRARY_SORT_FIELDS: [&str; 3] = ["Name", "Date", "Size"];
 const LIBRARY_SORT_DIRECTIONS: [&str; 2] = ["Ascending", "Descending"];
-const LIBRARY_THUMBNAIL_SIZE: f32 = 80.0;
+const LIBRARY_THUMBNAIL_SIZE: f32 = 96.0;
+const GRID_CELL_SIZE: f32 = LIBRARY_THUMBNAIL_SIZE + 16.0;
 const MIN_SELECTION_SIZE: f32 = 1.0;
 
 pub fn render_ui(
@@ -122,38 +123,52 @@ pub fn render_ui(
                         if ui.checkbox("Thumbnail", &mut show_thumbnail) {
                             app_state.set_show_thumbnail(show_thumbnail);
                         }
+                        ui.same_line();
+                        let mut show_grid_view = app_state.show_grid_view();
+                        if ui.checkbox("Grid", &mut show_grid_view) {
+                            app_state.set_show_grid_view(show_grid_view);
+                        }
                         ui.separator();
                         ui.child_window("library_scroll")
                             .size([0.0, -36.0])
                             .build(|| {
                                 let mut pending_scroll_direction =
                                     app_state.take_pending_library_scroll_to_selection();
-                                // render file list
-                                for (index, entry) in app_state.media_items().iter().enumerate() {
-                                    if render_library_item_row(
-                                        ui,
-                                        app_state,
-                                        app_resources,
-                                        index,
-                                        entry,
-                                    ) {
-                                        clicked_index = Some(index);
-                                    }
-
-                                    if app_state.current_index() == Some(index)
-                                        && let Some(direction) = pending_scroll_direction
+                                if app_state.show_grid_view() {
+                                    if let Some(idx) =
+                                        render_library_grid(ui, app_state, app_resources)
                                     {
-                                        if !ui.is_item_visible() {
-                                            let ratio = if direction < 0 {
-                                                0.2
-                                            } else if direction > 0 {
-                                                0.8
-                                            } else {
-                                                0.5
-                                            };
-                                            ui.set_scroll_here_y_with_ratio(ratio);
+                                        clicked_index = Some(idx);
+                                    }
+                                } else {
+                                    // render file list
+                                    for (index, entry) in app_state.media_items().iter().enumerate()
+                                    {
+                                        if render_library_item_row(
+                                            ui,
+                                            app_state,
+                                            app_resources,
+                                            index,
+                                            entry,
+                                        ) {
+                                            clicked_index = Some(index);
                                         }
-                                        pending_scroll_direction = None;
+
+                                        if app_state.current_index() == Some(index)
+                                            && let Some(direction) = pending_scroll_direction
+                                        {
+                                            if !ui.is_item_visible() {
+                                                let ratio = if direction < 0 {
+                                                    0.2
+                                                } else if direction > 0 {
+                                                    0.8
+                                                } else {
+                                                    0.5
+                                                };
+                                                ui.set_scroll_here_y_with_ratio(ratio);
+                                            }
+                                            pending_scroll_direction = None;
+                                        }
                                     }
                                 }
                             });
@@ -427,7 +442,6 @@ fn render_selection_window(ui: &Ui, app_state: &mut ViewerState) {
                 app_state.set_image_selection(Some(clamped));
             }
 
-
             ui.dummy([0.0, 8.0]);
             if app_state.image_selection().is_some() {
                 let _pad = ui.push_style_var(StyleVar::ItemSpacing([4.0, 4.0]));
@@ -439,7 +453,7 @@ fn render_selection_window(ui: &Ui, app_state: &mut ViewerState) {
                     app_state.clear_image_selection_state();
                 }
             }
-    });
+        });
 
     app_state.set_show_selection_window(open);
 }
@@ -508,6 +522,129 @@ fn render_library_item_row(
     }
 }
 
+fn render_library_grid(
+    ui: &Ui,
+    app_state: &ViewerState,
+    app_resources: &AppResources,
+) -> Option<usize> {
+    let available_width = app_state.library_width() - 16.0;
+    let cols = ((available_width / GRID_CELL_SIZE) as usize).max(1);
+    let cell = GRID_CELL_SIZE;
+    let show_thumbnail = app_state.show_thumbnail();
+    // Cell height: thumbnail area + label row, or just label row
+    let label_h = ui.frame_height_with_spacing();
+    let cell_h = if show_thumbnail {
+        LIBRARY_THUMBNAIL_SIZE + label_h
+    } else {
+        label_h
+    };
+    let mut clicked: Option<usize> = None;
+
+    let flags = TableFlags::NO_BORDERS_IN_BODY
+        | TableFlags::NO_BORDERS_IN_BODY_UNTIL_RESIZE
+        | TableFlags::PAD_OUTER_X;
+    let token = ui.begin_table_with_flags("grid_table", cols, flags);
+    if token.is_none() {
+        return None;
+    }
+
+    for i in 0..cols {
+        ui.table_setup_column(&format!("col_{i}"));
+    }
+
+    let items: Vec<(usize, String, Option<crate::core::media::ThumbnailInfo>)> = app_state
+        .media_items()
+        .iter()
+        .enumerate()
+        .map(|(i, e)| (i, e.file_name.clone(), e.thumbnail.clone()))
+        .collect();
+
+    for (index, file_name, thumbnail) in &items {
+        let col = index % cols;
+        if col == 0 {
+            ui.table_next_row();
+        }
+        ui.table_set_column_index(col);
+
+        let is_selected = app_state.current_index() == Some(*index);
+        let selectable_id = format!("##grid_item_{index}");
+
+        // Record top-left of this cell before drawing
+        let cell_origin = ui.cursor_screen_pos();
+        let cursor_pos = ui.cursor_pos();
+
+        // Draw the selectable spanning the full cell area first
+        if ui
+            .selectable_config(&selectable_id)
+            .selected(is_selected)
+            .size([cell, cell_h])
+            .build()
+        {
+            clicked = Some(*index);
+        }
+
+        // Draw thumbnail image or placeholder on top via draw_list
+        if show_thumbnail {
+            let (texture_id, uvs, img_w, img_h) = if let Some(thumb) = thumbnail {
+                let (w, h) = thumb.image_size;
+                (thumb.texture_index, thumb.uvs, w, h)
+            } else {
+                let region = &app_resources.empty_icon_region;
+                let (w, h) = region.image_size;
+                (region.texture_id, region.uvs, w, h)
+            };
+            let scale =
+                (LIBRARY_THUMBNAIL_SIZE / img_w as f32).min(LIBRARY_THUMBNAIL_SIZE / img_h as f32);
+            let draw_w = img_w as f32 * scale;
+            let draw_h = img_h as f32 * scale;
+            let img_x = cell_origin[0] + ((cell - draw_w) * 0.5).max(0.0);
+            let img_y = cell_origin[1] + ((LIBRARY_THUMBNAIL_SIZE - draw_h) * 0.5).max(0.0);
+            ui.get_window_draw_list()
+                .add_image(texture_id, [img_x, img_y], [img_x + draw_w, img_y + draw_h])
+                .uv_min([uvs[0], uvs[1]])
+                .uv_max([uvs[2], uvs[3]])
+                .build();
+        }
+
+        // Draw file name label below the thumbnail (or at top if no thumbnail)
+        let label_y_offset = if show_thumbnail {
+            LIBRARY_THUMBNAIL_SIZE
+        } else {
+            0.0
+        };
+        let label_pos = [cursor_pos[0] + 2.0, cursor_pos[1] + label_y_offset];
+        ui.set_cursor_pos(label_pos);
+        let label_w = cell - 4.0;
+        let display_name = truncate_text_to_width(ui, file_name, label_w);
+        ui.text(&display_name);
+    }
+
+    clicked
+}
+
+/// Truncate `text` so that it fits within `max_width` pixels, appending "…" if needed.
+fn truncate_text_to_width(ui: &Ui, text: &str, max_width: f32) -> String {
+    let full_width = ui.calc_text_size(text)[0];
+    if full_width <= max_width {
+        return text.to_owned();
+    }
+    let ellipsis = "...";
+    let ellipsis_w = ui.calc_text_size(ellipsis)[0];
+    let mut end = text.len();
+    while end > 0 {
+        // Step back one char boundary at a time
+        end -= 1;
+        while !text.is_char_boundary(end) {
+            end -= 1;
+        }
+        let candidate = &text[..end];
+        if ui.calc_text_size(candidate)[0] + ellipsis_w <= max_width {
+            return format!("{candidate}{ellipsis}");
+        }
+    }
+    ellipsis.to_owned()
+}
+
 fn property_grid_float_row(ui: &Ui, name: &str, id: &str, value: &mut f32) -> bool {
     ui.table_next_row();
     ui.table_next_column();
@@ -518,7 +655,6 @@ fn property_grid_float_row(ui: &Ui, name: &str, id: &str, value: &mut f32) -> bo
 }
 
 fn format_modified_date(prefix: &str, modified_time: Duration) -> String {
-
     let Ok(seconds) = i64::try_from(modified_time.as_secs()) else {
         return format!("{}Unknown", prefix);
     };

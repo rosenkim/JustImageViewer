@@ -99,6 +99,7 @@ pub struct ViewerState {
     library_sort_field: LibrarySortField,
     sort_direction: SortDirection,
     show_thumbnail: bool,
+    show_grid_view: bool,
     pending_library_scroll_to_selection: bool,
     pending_library_scroll_direction: i32,
     image_selection: Option<Rect2D>,
@@ -133,12 +134,14 @@ impl ViewerState {
         let library_sort_field = config.library_sort_field;
         let sort_direction = config.sort_direction;
         let show_thumbnail = config.show_thumbnail;
+        let show_grid_view = config.show_grid_view;
 
         config.library_width = library_width;
         config.image_view_mode = image_view_mode;
         config.library_sort_field = library_sort_field;
         config.sort_direction = sort_direction;
         config.show_thumbnail = show_thumbnail;
+        config.show_grid_view = show_grid_view;
 
         Self {
             config,
@@ -158,6 +161,7 @@ impl ViewerState {
             library_sort_field,
             sort_direction,
             show_thumbnail,
+            show_grid_view,
             pending_library_scroll_to_selection: false,
             pending_library_scroll_direction: 0,
             image_selection: None,
@@ -334,6 +338,15 @@ impl ViewerState {
     pub fn set_show_thumbnail(&mut self, show: bool) {
         self.show_thumbnail = show;
         self.config.show_thumbnail = show;
+    }
+
+    pub fn show_grid_view(&self) -> bool {
+        self.show_grid_view
+    }
+
+    pub fn set_show_grid_view(&mut self, show: bool) {
+        self.show_grid_view = show;
+        self.config.show_grid_view = show;
     }
 
     pub fn select_index(&mut self, index: usize) {
