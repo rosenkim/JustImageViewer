@@ -134,9 +134,15 @@ pub fn render_ui(
                             .build(|| {
                                 let mut pending_scroll_direction =
                                     app_state.take_pending_library_scroll_to_selection();
+
                                 if app_state.show_grid_view() {
                                     if let Some(index) =
-                                        render_library_grid(ui, app_state, app_resources)
+                                        render_library_grid(
+                                            ui,
+                                            app_state,
+                                            app_resources,
+                                            &mut pending_scroll_direction,
+                                        )
                                     {
                                         clicked_index = Some(index);
                                     }
@@ -153,22 +159,12 @@ pub fn render_ui(
                                         ) {
                                             clicked_index = Some(index);
                                         }
-
-                                        if app_state.current_index() == Some(index)
-                                            && let Some(direction) = pending_scroll_direction
-                                        {
-                                            if !ui.is_item_visible() {
-                                                let ratio = if direction < 0 {
-                                                    0.2
-                                                } else if direction > 0 {
-                                                    0.8
-                                                } else {
-                                                    0.5
-                                                };
-                                                ui.set_scroll_here_y_with_ratio(ratio);
-                                            }
-                                            pending_scroll_direction = None;
-                                        }
+                                        handle_scroll_to_selected(
+                                            ui,
+                                            app_state.current_index(),
+                                            index,
+                                            &mut pending_scroll_direction,
+                                        );
                                     }
                                 }
                             });
@@ -522,10 +518,32 @@ fn render_library_item_row(
     }
 }
 
+fn handle_scroll_to_selected(
+    ui: &Ui,
+    current_index: Option<usize>,
+    index: usize,
+    pending: &mut Option<i32>,
+) {
+    if current_index == Some(index) && let Some(direction) = *pending {
+        if !ui.is_item_visible() {
+            let ratio = if direction < 0 {
+                0.2
+            } else if direction > 0 {
+                0.8
+            } else {
+                0.5
+            };
+            ui.set_scroll_here_y_with_ratio(ratio);
+        }
+        *pending = None;
+    }
+}
+
 fn render_library_grid(
     ui: &Ui,
     app_state: &ViewerState,
     app_resources: &AppResources,
+    pending_scroll_direction: &mut Option<i32>,
 ) -> Option<usize> {
     let available_width = app_state.library_width() - 16.0;
     let cols = ((available_width / GRID_CELL_SIZE) as usize).max(1);
@@ -539,6 +557,7 @@ fn render_library_grid(
         LIBRARY_THUMBNAIL_SIZE
     };
     let mut clicked: Option<usize> = None;
+    let current_index = app_state.current_index();
 
     let flags = TableFlags::NO_BORDERS_IN_BODY
         | TableFlags::NO_BORDERS_IN_BODY_UNTIL_RESIZE
@@ -582,6 +601,7 @@ fn render_library_grid(
         {
             clicked = Some(*index);
         }
+        handle_scroll_to_selected(ui, current_index, *index, pending_scroll_direction);
 
         // Draw thumbnail image or placeholder on top via draw_list
         if show_thumbnail {
