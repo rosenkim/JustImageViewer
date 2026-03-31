@@ -135,10 +135,10 @@ pub fn render_ui(
                                 let mut pending_scroll_direction =
                                     app_state.take_pending_library_scroll_to_selection();
                                 if app_state.show_grid_view() {
-                                    if let Some(idx) =
+                                    if let Some(index) =
                                         render_library_grid(ui, app_state, app_resources)
                                     {
-                                        clicked_index = Some(idx);
+                                        clicked_index = Some(index);
                                     }
                                 } else {
                                     // render file list
@@ -531,12 +531,12 @@ fn render_library_grid(
     let cols = ((available_width / GRID_CELL_SIZE) as usize).max(1);
     let cell = GRID_CELL_SIZE;
     let show_thumbnail = app_state.show_thumbnail();
-    // Cell height: thumbnail area + label row, or just label row
+    // Cell height: thumbnail area + label row, or a thumbnail-sized text box when hidden.
     let label_h = ui.frame_height_with_spacing();
     let cell_h = if show_thumbnail {
         LIBRARY_THUMBNAIL_SIZE + label_h
     } else {
-        label_h
+        LIBRARY_THUMBNAIL_SIZE
     };
     let mut clicked: Option<usize> = None;
 
@@ -612,37 +612,93 @@ fn render_library_grid(
         } else {
             0.0
         };
-        let label_pos = [cursor_pos[0] + 2.0, cursor_pos[1] + label_y_offset];
+        let label_pos = [cursor_pos[0] + 2.0, cursor_pos[1] + label_y_offset + 2.0];
         ui.set_cursor_pos(label_pos);
         let label_w = cell - 4.0;
-        let display_name = truncate_text_to_width(ui, file_name, label_w);
-        ui.text(&display_name);
+        if show_thumbnail {
+            let display_name = wrap_text_to_width_and_lines(ui, file_name, label_w, 1);
+            ui.text(&display_name);
+        } else {
+            let line_h = ui.frame_height_with_spacing().max(1.0);
+            let max_lines = ((LIBRARY_THUMBNAIL_SIZE - 4.0) / line_h).floor().max(1.0) as usize;
+            let display_name = wrap_text_to_width_and_lines(ui, file_name, label_w, max_lines);
+            ui.text(&display_name);
+        }
     }
 
     clicked
 }
 
-/// Truncate `text` so that it fits within `max_width` pixels, appending "…" if needed.
-fn truncate_text_to_width(ui: &Ui, text: &str, max_width: f32) -> String {
-    let full_width = ui.calc_text_size(text)[0];
-    if full_width <= max_width {
-        return text.to_owned();
+/// Wrap `text` to fit within `max_width` pixels and `max_lines` lines.
+/// If the last line doesn't fit, it will be truncated with "...".
+/// If `max_lines` is 1, this acts like a simple truncate with ellipsis.
+fn wrap_text_to_width_and_lines(ui: &Ui, text: &str, max_width: f32, max_lines: usize) -> String {
+    if text.is_empty() || max_lines == 0 {
+        return String::new();
     }
+
     let ellipsis = "...";
     let ellipsis_w = ui.calc_text_size(ellipsis)[0];
-    let mut end = text.len();
-    while end > 0 {
-        // Step back one char boundary at a time
-        end -= 1;
-        while !text.is_char_boundary(end) {
-            end -= 1;
+    let mut remaining = text.trim();
+    let mut lines: Vec<String> = Vec::with_capacity(max_lines);
+
+    for line_index in 0..max_lines {
+        if remaining.is_empty() {
+            break;
         }
-        let candidate = &text[..end];
-        if ui.calc_text_size(candidate)[0] + ellipsis_w <= max_width {
-            return format!("{candidate}{ellipsis}");
+
+        let full_width = ui.calc_text_size(remaining)[0];
+        if full_width <= max_width {
+            lines.push(remaining.to_owned());
+            break;
         }
+
+        // Last line: truncate with ellipsis
+        if line_index == max_lines - 1 {
+            let mut end = remaining.len();
+            while end > 0 {
+                // Step back one char boundary at a time
+                end -= 1;
+                while !remaining.is_char_boundary(end) {
+                    end -= 1;
+                }
+                let candidate = &remaining[..end];
+                if ui.calc_text_size(candidate)[0] + ellipsis_w <= max_width {
+                    lines.push(format!("{candidate}{ellipsis}"));
+                    break;
+                }
+            }
+            if lines.len() == line_index {
+                lines.push(ellipsis.to_owned());
+            }
+            break;
+        }
+
+        // Find how many characters fit in this line (without ellipsis)
+        let mut fit_end = 0usize;
+        for (idx, ch) in remaining.char_indices() {
+            let next = idx + ch.len_utf8();
+            if ui.calc_text_size(&remaining[..next])[0] <= max_width {
+                fit_end = next;
+            } else {
+                break;
+            }
+        }
+
+        if fit_end == 0 {
+            fit_end = remaining
+                .char_indices()
+                .nth(1)
+                .map(|(idx, _)| idx)
+                .unwrap_or(remaining.len());
+        }
+
+        let line = remaining[..fit_end].trim_end();
+        lines.push(line.to_owned());
+        remaining = remaining[fit_end..].trim_start();
     }
-    ellipsis.to_owned()
+
+    lines.join("\n")
 }
 
 fn property_grid_float_row(ui: &Ui, name: &str, id: &str, value: &mut f32) -> bool {
