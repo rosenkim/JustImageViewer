@@ -102,6 +102,7 @@ pub struct ViewerState {
     show_grid_view: bool,
     pending_library_scroll_to_selection: bool,
     pending_library_scroll_direction: i32,
+    library_items_per_row: usize,
     image_selection: Option<Rect2D>,
     image_selection_drag_start: Option<[f32; 2]>,
     image_selection_drag_mode: Option<ImageSelectionDragMode>,
@@ -164,6 +165,7 @@ impl ViewerState {
             show_grid_view,
             pending_library_scroll_to_selection: false,
             pending_library_scroll_direction: 0,
+            library_items_per_row: 1,
             image_selection: None,
             image_selection_drag_start: None,
             image_selection_drag_mode: None,
@@ -347,6 +349,15 @@ impl ViewerState {
     pub fn set_show_grid_view(&mut self, show: bool) {
         self.show_grid_view = show;
         self.config.show_grid_view = show;
+    }
+
+    pub fn library_items_per_row(&self) -> usize {
+        self.library_items_per_row.max(1)
+    }
+
+    pub fn set_library_items_per_row(&mut self, items_per_row: usize) {
+        // Keep this value always valid so keyboard move is safe.
+        self.library_items_per_row = items_per_row.max(1);
     }
 
     pub fn select_index(&mut self, index: usize) {

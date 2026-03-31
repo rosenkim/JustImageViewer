@@ -134,6 +134,8 @@ pub fn render_ui(
                             .build(|| {
                                 let mut pending_scroll_direction =
                                     app_state.take_pending_library_scroll_to_selection();
+                                let items_per_row = calculate_library_items_per_row(ui, app_state);
+                                app_state.set_library_items_per_row(items_per_row);
 
                                 if app_state.show_grid_view() {
                                     if let Some(index) =
@@ -141,6 +143,7 @@ pub fn render_ui(
                                             ui,
                                             app_state,
                                             app_resources,
+                                            items_per_row,
                                             &mut pending_scroll_direction,
                                         )
                                     {
@@ -543,10 +546,9 @@ fn render_library_grid(
     ui: &Ui,
     app_state: &ViewerState,
     app_resources: &AppResources,
+    cols: usize,
     pending_scroll_direction: &mut Option<i32>,
 ) -> Option<usize> {
-    let available_width = app_state.library_width() - 16.0;
-    let cols = ((available_width / GRID_CELL_SIZE) as usize).max(1);
     let cell = GRID_CELL_SIZE;
     let show_thumbnail = app_state.show_thumbnail();
     // Cell height: thumbnail area + label row, or a thumbnail-sized text box when hidden.
@@ -647,6 +649,15 @@ fn render_library_grid(
     }
 
     clicked
+}
+
+fn calculate_library_items_per_row(ui: &Ui, app_state: &ViewerState) -> usize {
+    if !app_state.show_grid_view() {
+        return 1;
+    }
+    // Use the current scroll area width to get real visible column count.
+    let available_width = ui.content_region_avail()[0].max(GRID_CELL_SIZE);
+    ((available_width / GRID_CELL_SIZE).floor() as usize).max(1)
 }
 
 /// Wrap `text` to fit within `max_width` pixels and `max_lines` lines.

@@ -476,19 +476,27 @@ async fn main() -> anyhow::Result<()> {
                                 {
                                     app_state.open_directory_dialog();
                                 }
-                                // Arrow: go to next image.
-                                PhysicalKey::Code(KeyCode::ArrowRight)
-                                | PhysicalKey::Code(KeyCode::ArrowDown) => {
+                                // ArrowRight: move by one item.
+                                PhysicalKey::Code(KeyCode::ArrowRight) => {
                                     app_state.advance_selection(1);
+                                }
+                                // ArrowDown: move by one visual row in the library.
+                                PhysicalKey::Code(KeyCode::ArrowDown) => {
+                                    let step = app_state.library_items_per_row() as i32;
+                                    app_state.advance_selection(step);
                                 }
                                 // PageDown: go to next 10 images.
                                 PhysicalKey::Code(KeyCode::PageDown) => {
                                     app_state.advance_selection(10);
                                 }
-                                // Arrow: go to previous image.
-                                PhysicalKey::Code(KeyCode::ArrowLeft)
-                                | PhysicalKey::Code(KeyCode::ArrowUp) => {
+                                // ArrowLeft: move by one item.
+                                PhysicalKey::Code(KeyCode::ArrowLeft) => {
                                     app_state.advance_selection(-1);
+                                }
+                                // ArrowUp: move by one visual row in the library.
+                                PhysicalKey::Code(KeyCode::ArrowUp) => {
+                                    let step = app_state.library_items_per_row() as i32;
+                                    app_state.advance_selection(-step);
                                 }
                                 // PageUp: go to previous 10 images.
                                 PhysicalKey::Code(KeyCode::PageUp) => {
