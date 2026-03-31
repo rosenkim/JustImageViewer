@@ -476,17 +476,34 @@ async fn main() -> anyhow::Result<()> {
                                 {
                                     app_state.open_directory_dialog();
                                 }
-                                // Arrow/PageDown: go to next image.
+                                // Arrow: go to next image.
                                 PhysicalKey::Code(KeyCode::ArrowRight)
-                                | PhysicalKey::Code(KeyCode::ArrowDown)
-                                | PhysicalKey::Code(KeyCode::PageDown) => {
+                                | PhysicalKey::Code(KeyCode::ArrowDown) => {
                                     app_state.advance_selection(1);
                                 }
-                                // Arrow/PageUp: go to previous image.
+                                // PageDown: go to next 10 images.
+                                PhysicalKey::Code(KeyCode::PageDown) => {
+                                    app_state.advance_selection(10);
+                                }
+                                // Arrow: go to previous image.
                                 PhysicalKey::Code(KeyCode::ArrowLeft)
-                                | PhysicalKey::Code(KeyCode::ArrowUp)
-                                | PhysicalKey::Code(KeyCode::PageUp) => {
+                                | PhysicalKey::Code(KeyCode::ArrowUp) => {
                                     app_state.advance_selection(-1);
+                                }
+                                // PageUp: go to previous 10 images.
+                                PhysicalKey::Code(KeyCode::PageUp) => {
+                                    app_state.advance_selection(-10);
+                                }
+                                // Home: go to first image.
+                                PhysicalKey::Code(KeyCode::Home) => {
+                                    app_state.select_index(0);
+                                }
+                                // End: go to last image.
+                                PhysicalKey::Code(KeyCode::End) => {
+                                    let total = app_state.media_items().len();
+                                    if total > 0 {
+                                        app_state.select_index(total - 1);
+                                    }
                                 }
                                 _ => {}
                             }

@@ -353,6 +353,8 @@ impl ViewerState {
         if index < self.media_items.len() {
             self.current_index = Some(index);
             self.needs_image_reload = true;
+            self.pending_library_scroll_to_selection = true;
+            self.pending_library_scroll_direction = 0;
             self.clear_image_selection_state();
         }
     }
@@ -747,4 +749,3 @@ pub fn format_file_size(bytes: u64) -> String {
         format!("{value:.1} {}", UNITS[unit_index])
     }
 }
-
