@@ -31,6 +31,8 @@ pub struct AppConfig {
     pub ui_scale_factor: f32,
     pub background_style: BackgroundStyle,
     pub image_cache_count: usize,
+    pub focused_fps: u32,
+    pub unfocused_fps: u32,
 
     pub show_library: bool,
     pub show_info: bool,
@@ -54,6 +56,8 @@ impl Default for AppConfig {
             ui_scale_factor: 1.0,
             background_style: BackgroundStyle::default(),
             image_cache_count: 32,
+            focused_fps: 60,
+            unfocused_fps: 5,
             show_library: true,
             show_info: true,
             show_selection_window: false,

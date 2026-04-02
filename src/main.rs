@@ -33,8 +33,6 @@ use crate::render::texture_atlas_manager::TextureAtlasManager;
 use crate::render::image_uploader::ImageUploader;
 use crate::ui::render_ui;
 
-const FOCUSED_FPS: u32 = 60;
-const UNFOCUSED_FPS: u32 = 5;
 const LOGICAL_DPI: f32 = 96.0;
 const POINTS_PER_INCH: f32 = 72.0;
 
@@ -123,7 +121,6 @@ async fn main() -> anyhow::Result<()> {
     }
 
     log::info!("Loaded configuration from {}", config_handle.path.display());
-
     let mut app_state = ViewerState::new(config_handle.path, config_handle.settings);
     if let Some(open_path) = args.open_path {
         app_state
@@ -132,6 +129,27 @@ async fn main() -> anyhow::Result<()> {
     } else {
         restore_last_directory_if_needed(&mut app_state);
     }
+
+    // Validate FPS settings
+    let focused_fps = if app_state.config().focused_fps > 0 {
+        app_state.config().focused_fps
+    } else {
+        log::warn!(
+            "Invalid focused_fps ({}). Falling back to 60",
+            app_state.config().focused_fps
+        );
+        60
+    };
+    let unfocused_fps = if app_state.config().unfocused_fps > 0 {
+        app_state.config().unfocused_fps
+    } else {
+        log::warn!(
+            "Invalid unfocused_fps ({}). Falling back to 5",
+            app_state.config().unfocused_fps
+        );
+        5
+    };
+
 
     let event_loop = EventLoop::new().map_err(anyhow::Error::msg)?;
 
@@ -325,8 +343,9 @@ async fn main() -> anyhow::Result<()> {
     let mut last_frame = Instant::now();
     let mut modifiers = ModifiersState::default();
     let mut is_window_focused = true;
-    let focused_frame_interval = frame_interval_from_fps(FOCUSED_FPS);
-    let unfocused_frame_interval = frame_interval_from_fps(UNFOCUSED_FPS);
+
+    let focused_frame_interval = frame_interval_from_fps(focused_fps);
+    let unfocused_frame_interval = frame_interval_from_fps(unfocused_fps);
     let mut next_redraw_at = Instant::now();
 
     let _instance = instance;

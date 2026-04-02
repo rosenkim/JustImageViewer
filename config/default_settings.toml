@@ -21,6 +21,10 @@ sort_direction = "ascending"
 show_thumbnail = true
 # Maximum number of images kept in memory cache
 image_cache_count = 32
+# Rendering FPS while window is focused
+focused_fps = 60
+# Rendering FPS while window is unfocused
+unfocused_fps = 5
 
 [background_style]
 # mode can be "checker" or "solid"
