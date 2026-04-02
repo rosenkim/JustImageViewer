@@ -140,15 +140,13 @@ pub fn render_ui(
                                 app_state.set_library_items_per_row(items_per_row);
 
                                 if app_state.show_grid_view() {
-                                    if let Some(index) =
-                                        render_library_grid(
-                                            ui,
-                                            app_state,
-                                            app_resources,
-                                            items_per_row,
-                                            &mut pending_scroll_direction,
-                                        )
-                                    {
+                                    if let Some(index) = render_library_grid(
+                                        ui,
+                                        app_state,
+                                        app_resources,
+                                        items_per_row,
+                                        &mut pending_scroll_direction,
+                                    ) {
                                         clicked_index = Some(index);
                                     }
                                 } else {
@@ -207,71 +205,36 @@ pub fn render_ui(
                 .size([0.0, 0.0])
                 .border(true)
                 .build(|| {
+                    const INFO_WIDTH: f32 = 200.0;
                     let _pad = ui.push_style_var(StyleVar::ItemSpacing([4.0, 4.0]));
-                    let metadata_height = if app_state.show_info() { 86.0 } else { 0.0 };
+                    let mut image_width = ui.content_region_avail()[0];
+                    let show_info = app_state.show_info() && image_width > INFO_WIDTH + SPLITTER_WIDTH;
+
+                    if show_info {
+                        image_width -= INFO_WIDTH + SPLITTER_WIDTH;
+                    }
+
                     ui.child_window("image_region")
-                        .size([0.0, -metadata_height])
+                        .size([image_width.max(100.0), 0.0])
                         .flags(imgui::WindowFlags::HORIZONTAL_SCROLLBAR)
                         .build(|| {
-                            if let Some(ref texture) = app_state.current_texture() {
-                                let avail = ui.content_region_avail();
-                                let fb_scale = ui.io().display_framebuffer_scale[0];
-                                let width_scale = avail[0] / texture.width as f32;
-                                let height_scale = avail[1] / texture.height as f32;
-                                let scale = match app_state.image_view_mode() {
-                                    ImageViewMode::Original => 1.0 / fb_scale,
-                                    ImageViewMode::FitToWindow => width_scale.min(height_scale),
-                                    ImageViewMode::FitToWidth => width_scale,
-                                }
-                                .max(0.01);
-                                let display_size =
-                                    [texture.width as f32 * scale, texture.height as f32 * scale];
-                                let cursor = ui.cursor_pos();
-                                let centered = [
-                                    (avail[0] - display_size[0]).max(0.0) * 0.5,
-                                    (avail[1] - display_size[1]).max(0.0) * 0.5,
-                                ];
-                                ui.set_cursor_pos([
-                                    (cursor[0] + centered[0]).floor(),
-                                    (cursor[1] + centered[1]).floor(),
-                                ]);
-
-                                let image_screen_min = ui.cursor_screen_pos();
-                                render_image_background(ui, app_state, image_screen_min, display_size);
-
-                                let uv0 = [0.0, 0.0];
-                                let uv1 = [1.0, 1.0];
-                                imgui::Image::new(texture.id, display_size)
-                                    .uv0(uv0)
-                                    .uv1(uv1)
-                                    .build(ui);
-
-                                let view_panel_min = ui.window_pos();
-                                let view_panel_max = [
-                                    view_panel_min[0] + ui.window_size()[0],
-                                    view_panel_min[1] + ui.window_size()[1],
-                                ];
-
-                                render_image_selection_widget(
-                                    ui,
-                                    app_state,
-                                    is_pending,
-                                    view_panel_min,
-                                    view_panel_max,
-                                    ui.item_rect_min(),
-                                    display_size,
-                                    [texture.width as f32, texture.height as f32],
-                                );
-                            } else if app_state.current_directory().is_some() {
-                                ui.text("No image selected or decode failed.");
-                            } else {
-                                ui.text("Welcome to Vibe Image Viewer");
-                                ui.text("Open an image directory to begin.");
-                            }
+                            render_image_content(ui, app_state, is_pending);
                         });
 
-                    if app_state.show_info() {
-                        render_file_info(ui, app_state);
+                    if show_info {
+                        ui.same_line();
+                        ui.invisible_button(
+                            "info_splitter",
+                            [SPLITTER_WIDTH, ui.content_region_avail()[1]],
+                        );
+                        if ui.is_item_hovered() {
+                            ui.set_mouse_cursor(Some(MouseCursor::ResizeEW));
+                        }
+                        ui.same_line();
+
+                        ui.child_window("info_region").size([0.0, 0.0]).build(|| {
+                            render_file_info(ui, app_state);
+                        });
                     }
                 });
         });
@@ -335,11 +298,7 @@ fn render_image_background(
                 let x_end = max[0];
                 while x < x_end {
                     let x_next = (x + CHECKER_TILE_SIZE).min(x_end);
-                    let tile_color = if (row + col) % 2 == 0 {
-                        color1
-                    } else {
-                        color2
-                    };
+                    let tile_color = if (row + col) % 2 == 0 { color1 } else { color2 };
                     draw_list
                         .add_rect([x, y], [x_next, y_next], tile_color)
                         .filled(true)
@@ -434,9 +393,8 @@ fn render_main_menu_bar(ui: &imgui::Ui, app_state: &mut ViewerState, running: &m
 }
 
 pub fn render_file_info(ui: &imgui::Ui, app_state: &ViewerState) {
-    ui.separator();
     if let Some(entry) = app_state.current_entry() {
-        ui.text(format!("File: {}", entry.file_name));
+        ui.text_wrapped(format!("File: {}", entry.file_name));
         ui.text(format!("Format: {}", entry.format.as_str()));
         ui.text(format!("Size: {}", format_file_size(entry.file_size)));
         if let Some((w, h)) = app_state.current_image_size() {
@@ -445,6 +403,7 @@ pub fn render_file_info(ui: &imgui::Ui, app_state: &ViewerState) {
     } else {
         ui.text("No file selected");
     }
+    ui.separator();
 }
 
 fn render_selection_window(ui: &Ui, app_state: &mut ViewerState) {
@@ -596,7 +555,9 @@ fn handle_scroll_to_selected(
     index: usize,
     pending: &mut Option<i32>,
 ) {
-    if current_index == Some(index) && let Some(direction) = *pending {
+    if current_index == Some(index)
+        && let Some(direction) = *pending
+    {
         if !ui.is_item_visible() {
             let ratio = if direction < 0 {
                 0.2
@@ -843,4 +804,61 @@ fn clamp_selection_axis(mut min: f32, mut max: f32, bound: f32) -> (f32, f32) {
         min = (max - MIN_SELECTION_SIZE).max(0.0);
     }
     (min, max)
+}
+
+fn render_image_content(ui: &imgui::Ui, app_state: &mut ViewerState, is_pending: bool) {
+    if let Some(ref texture) = app_state.current_texture() {
+        let avail = ui.content_region_avail();
+        let fb_scale = ui.io().display_framebuffer_scale[0];
+        let width_scale = avail[0] / texture.width as f32;
+        let height_scale = avail[1] / texture.height as f32;
+        let scale = match app_state.image_view_mode() {
+            ImageViewMode::Original => 1.0 / fb_scale,
+            ImageViewMode::FitToWindow => width_scale.min(height_scale),
+            ImageViewMode::FitToWidth => width_scale,
+        }
+        .max(0.01);
+        let display_size = [texture.width as f32 * scale, texture.height as f32 * scale];
+        let cursor = ui.cursor_pos();
+        let centered = [
+            (avail[0] - display_size[0]).max(0.0) * 0.5,
+            (avail[1] - display_size[1]).max(0.0) * 0.5,
+        ];
+        ui.set_cursor_pos([
+            (cursor[0] + centered[0]).floor(),
+            (cursor[1] + centered[1]).floor(),
+        ]);
+
+        let image_screen_min = ui.cursor_screen_pos();
+        render_image_background(ui, app_state, image_screen_min, display_size);
+
+        let uv0 = [0.0, 0.0];
+        let uv1 = [1.0, 1.0];
+        imgui::Image::new(texture.id, display_size)
+            .uv0(uv0)
+            .uv1(uv1)
+            .build(ui);
+
+        let view_panel_min = ui.window_pos();
+        let view_panel_max = [
+            view_panel_min[0] + ui.window_size()[0],
+            view_panel_min[1] + ui.window_size()[1],
+        ];
+
+        render_image_selection_widget(
+            ui,
+            app_state,
+            is_pending,
+            view_panel_min,
+            view_panel_max,
+            ui.item_rect_min(),
+            display_size,
+            [texture.width as f32, texture.height as f32],
+        );
+    } else if app_state.current_directory().is_some() {
+        ui.text("No image selected or decode failed.");
+    } else {
+        ui.text("Welcome to Vibe Image Viewer");
+        ui.text("Open an image directory to begin.");
+    }
 }
