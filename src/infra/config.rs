@@ -13,6 +13,8 @@ const QUALIFIER: &str = "dev";
 const ORGANIZATION: &str = "Vibe";
 const APPLICATION: &str = "ImageViewer";
 const CONFIG_FILENAME: &str = "settings.toml";
+const DEFAULT_BACKGROUND_COLOR1: &str = "#CCCCCC";
+const DEFAULT_BACKGROUND_COLOR2: &str = "#FFFFFF";
 const LOGICAL_DPI: f32 = 96.0;
 const POINTS_PER_INCH: f32 = 72.0;
 
@@ -71,15 +73,27 @@ impl Default for AppConfig {
 #[serde(default)]
 pub struct BackgroundStyle {
     pub mode: BackgroundMode,
-    pub brightness: f32,
+    #[serde(default = "default_background_color1")]
+    pub color1: String,
+    #[serde(default = "default_background_color2")]
+    pub color2: String,
 }
 
 impl Default for BackgroundStyle {
     fn default() -> Self {
         Self {
             mode: BackgroundMode::Checker,
-            brightness: 0.5,
+            color1: default_background_color1(),
+            color2: default_background_color2(),
         }
+    }
+}
+
+impl BackgroundStyle {
+    pub fn resolved_colors_rgb(&self) -> ([f32; 3], [f32; 3]) {
+        let color1 = parse_hex_rgb(&self.color1).unwrap_or([0.3725, 0.3725, 0.3725]);
+        let color2 = parse_hex_rgb(&self.color2).unwrap_or([0.2902, 0.2902, 0.2902]);
+        (color1, color2)
     }
 }
 
@@ -154,6 +168,8 @@ pub fn load_or_create(reset_config: bool) -> Result<ConfigHandle> {
         }
     }
 
+    normalize_background_style(&mut settings.background_style);
+
     Ok(ConfigHandle {
         settings,
         path: config_path,
@@ -191,4 +207,48 @@ fn toml_number_to_f32(value: &toml::Value) -> Option<f32> {
     }
 
     value.as_integer().map(|v| v as f32)
+}
+
+fn default_background_color1() -> String {
+    DEFAULT_BACKGROUND_COLOR1.to_owned()
+}
+
+fn default_background_color2() -> String {
+    DEFAULT_BACKGROUND_COLOR2.to_owned()
+}
+
+fn normalize_background_style(style: &mut BackgroundStyle) {
+    if parse_hex_rgb(&style.color1).is_none() {
+        log::warn!(
+            "Invalid background_style.color1 '{}'. Using default {}",
+            style.color1,
+            DEFAULT_BACKGROUND_COLOR1
+        );
+        style.color1 = default_background_color1();
+    }
+
+    if parse_hex_rgb(&style.color2).is_none() {
+        log::warn!(
+            "Invalid background_style.color2 '{}'. Using default {}",
+            style.color2,
+            DEFAULT_BACKGROUND_COLOR2
+        );
+        style.color2 = default_background_color2();
+    }
+}
+
+pub fn parse_hex_rgb(value: &str) -> Option<[f32; 3]> {
+    if (value.len() != 7 && value.len() != 9) || !value.starts_with('#') {
+        return None;
+    }
+
+    let r = u8::from_str_radix(&value[1..3], 16).ok()?;
+    let g = u8::from_str_radix(&value[3..5], 16).ok()?;
+    let b = u8::from_str_radix(&value[5..7], 16).ok()?;
+
+    Some([
+        f32::from(r) / 255.0,
+        f32::from(g) / 255.0,
+        f32::from(b) / 255.0,
+    ])
 }

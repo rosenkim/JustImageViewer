@@ -1,9 +1,10 @@
 use crate::app::{ImageViewMode, LibrarySortField, SortDirection, ViewerState, format_file_size};
 use crate::core::media::MediaEntry;
+use crate::infra::config::BackgroundMode;
 use crate::math::{Point2D, Rect2D};
 use crate::render::app_resources::AppResources;
 use chrono::{DateTime, Local, Utc};
-use imgui::{Condition, MouseCursor, StyleVar, TableFlags, Ui};
+use imgui::{Condition, ImColor32, MouseCursor, StyleVar, TableFlags, Ui};
 use std::time::Duration;
 
 use super::helper::render_image_selection_widget;
@@ -17,6 +18,7 @@ const LIBRARY_SORT_DIRECTIONS: [&str; 2] = ["Ascending", "Descending"];
 const LIBRARY_THUMBNAIL_SIZE: f32 = 96.0;
 const GRID_CELL_SIZE: f32 = LIBRARY_THUMBNAIL_SIZE + 16.0;
 const MIN_SELECTION_SIZE: f32 = 1.0;
+const CHECKER_TILE_SIZE: f32 = 64.0;
 
 pub fn render_ui(
     ui: &imgui::Ui,
@@ -234,6 +236,9 @@ pub fn render_ui(
                                     (cursor[1] + centered[1]).floor(),
                                 ]);
 
+                                let image_screen_min = ui.cursor_screen_pos();
+                                render_image_background(ui, app_state, image_screen_min, display_size);
+
                                 let uv0 = [0.0, 0.0];
                                 let uv1 = [1.0, 1.0];
                                 imgui::Image::new(texture.id, display_size)
@@ -290,6 +295,70 @@ pub fn render_ui(
     if let Some(index) = clicked_index {
         app_state.select_index(index);
     }
+}
+
+fn render_image_background(
+    ui: &Ui,
+    app_state: &ViewerState,
+    image_screen_min: [f32; 2],
+    image_display_size: [f32; 2],
+) {
+    if image_display_size[0] <= 0.0 || image_display_size[1] <= 0.0 {
+        return;
+    }
+
+    let style = &app_state.config().background_style;
+    let (color1_rgb, color2_rgb) = style.resolved_colors_rgb();
+    let color1 = rgb_to_im_color32(color1_rgb);
+    let color2 = rgb_to_im_color32(color2_rgb);
+
+    let draw_list = ui.get_window_draw_list();
+    let min = image_screen_min;
+    let max = [
+        image_screen_min[0] + image_display_size[0],
+        image_screen_min[1] + image_display_size[1],
+    ];
+
+    match style.mode {
+        BackgroundMode::Solid => {
+            draw_list.add_rect(min, max, color1).filled(true).build();
+        }
+        BackgroundMode::Checker => {
+            let mut y = min[1];
+            let mut row = 0usize;
+            let y_end = max[1];
+            while y < y_end {
+                let y_next = (y + CHECKER_TILE_SIZE).min(y_end);
+                let mut x = min[0];
+
+                let mut col = 0usize;
+                let x_end = max[0];
+                while x < x_end {
+                    let x_next = (x + CHECKER_TILE_SIZE).min(x_end);
+                    let tile_color = if (row + col) % 2 == 0 {
+                        color1
+                    } else {
+                        color2
+                    };
+                    draw_list
+                        .add_rect([x, y], [x_next, y_next], tile_color)
+                        .filled(true)
+                        .build();
+                    x = x_next;
+                    col += 1;
+                }
+                y = y_next;
+                row += 1;
+            }
+        }
+    }
+}
+
+fn rgb_to_im_color32(rgb: [f32; 3]) -> ImColor32 {
+    let r = (rgb[0].clamp(0.0, 1.0) * 255.0).round() as u8;
+    let g = (rgb[1].clamp(0.0, 1.0) * 255.0).round() as u8;
+    let b = (rgb[2].clamp(0.0, 1.0) * 255.0).round() as u8;
+    ImColor32::from_rgba(r, g, b, 255)
 }
 
 fn render_main_menu_bar(ui: &imgui::Ui, app_state: &mut ViewerState, running: &mut bool) {

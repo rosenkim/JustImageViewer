@@ -623,6 +623,9 @@ async fn main() -> anyhow::Result<()> {
                                     label: Some("image-viewer encoder"),
                                 });
 
+                            let (background_color1, _) =
+                                app_state.config().background_style.resolved_colors_rgb();
+
                             {
                                 // Begin a render pass to clear screen and draw ImGui.
                                 let mut rpass =
@@ -634,9 +637,9 @@ async fn main() -> anyhow::Result<()> {
                                                 resolve_target: None,
                                                 ops: wgpu::Operations {
                                                     load: wgpu::LoadOp::Clear(wgpu::Color {
-                                                        r: 0.08,
-                                                        g: 0.09,
-                                                        b: 0.11,
+                                                        r: f64::from(background_color1[0]),
+                                                        g: f64::from(background_color1[1]),
+                                                        b: f64::from(background_color1[2]),
                                                         a: 1.0,
                                                     }),
                                                     store: wgpu::StoreOp::Store,
