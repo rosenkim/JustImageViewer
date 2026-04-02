@@ -1,5 +1,4 @@
 use std::{
-    collections::HashMap,
     path::{Path, PathBuf},
     sync::{
         atomic::{AtomicIsize, Ordering},
@@ -28,15 +27,6 @@ pub struct UploadedTexture {
     pub pixels: Arc<[u8]>,
 }
 
-struct TextureRecord {
-    texture_id: TextureId,
-    width: usize,
-    height: usize,
-    last_used: u32,
-    /// RGBA pixel data retained for clipboard copy operations.
-    pixels: Arc<[u8]>,
-}
-
 /// Successful decode result from the background thread.
 struct DecodeOutput {
     decoded: DecodedImage,
@@ -52,51 +42,27 @@ struct PendingDecode {
 }
 
 pub struct ImageUploader {
-    textures: HashMap<PathBuf, TextureRecord>,
     max_texture_size: u32,
-    max_cache_size: usize,
-    access_counter: u32,
     /// Currently running background decode task (at most one at a time).
-    pending: Option<PendingDecode>
+    pending: Option<PendingDecode>,
+    current_texture_id: Option<TextureId>,
 }
 
 impl ImageUploader {
     /// Create texture cache and decoded image cache.
     pub fn new(
         max_texture_size: u32,
-        max_cache_size: usize,
     ) -> Self {
         Self {
-            textures: HashMap::new(),
             max_texture_size,
-            max_cache_size,
-            access_counter: 0,
             pending: None,
+            current_texture_id: None,
         }
-    }
-
-    /// If a cached texture already exists for `path`, return it immediately.
-    pub fn get_cached(&mut self, path: &Path) -> Option<UploadedTexture> {
-        let existing = self.textures.get_mut(path)?;
-        self.access_counter += 1;
-        existing.last_used = self.access_counter;
-        Some(UploadedTexture {
-            id: existing.texture_id,
-            width: existing.width,
-            height: existing.height,
-            pixels: existing.pixels.clone(),
-        })
     }
 
     /// Kick off a background decode for `path` using `tokio::spawn_blocking`.
     /// Cancels any previously pending decode.
     pub fn request_decode(&mut self, path: &Path, image_manager: &mut ImageManager) {
-        // If already cached, no need to decode again.
-        if self.textures.contains_key(path) {
-            self.pending = None;
-            return;
-        }
-
         let owned_path = path.to_path_buf();
 
         // Try binary cache first (cheap clone), otherwise read file on the blocking thread.
@@ -222,17 +188,6 @@ impl ImageUploader {
             }
         };
 
-        self.evict_if_full(renderer, imgui_textures);
-
-        self.access_counter += 1;
-        let record = TextureRecord {
-            texture_id,
-            width: decoded.width,
-            height: decoded.height,
-            last_used: self.access_counter,
-            pixels: decoded.pixels.clone(),
-        };
-
         let result_path = path.clone();
         let uploaded = UploadedTexture {
             id: texture_id,
@@ -240,7 +195,6 @@ impl ImageUploader {
             height: decoded.height,
             pixels: decoded.pixels,
         };
-        self.textures.insert(path, record);
 
         Some((result_path, uploaded))
     }
@@ -250,31 +204,52 @@ impl ImageUploader {
         self.pending.is_some()
     }
 
-    /// Evict the least-recently-used entry if the cache is at capacity.
-    fn evict_if_full(&mut self, renderer: &mut imgui_wgpu::Renderer, imgui_textures: &mut ImguiTextures) {
-        if self.textures.len() < self.max_cache_size {
+    /// Mark a texture as active and release the previous active texture if present.
+    pub fn activate_texture(
+        &mut self,
+        renderer: &mut imgui_wgpu::Renderer,
+        imgui_textures: &mut ImguiTextures,
+        texture_id: TextureId,
+    ) {
+        if self.current_texture_id == Some(texture_id) {
             return;
         }
 
-        let oldest_key = self
-            .textures
-            .iter()
-            .min_by_key(|(_, record)| record.last_used)
-            .map(|(key, _)| key.clone());
+        if let Some(old_texture_id) = self.current_texture_id.take() {
+            imgui_textures.remove(renderer, old_texture_id);
+        }
 
-        if let Some(key) = oldest_key {
-            if let Some(record) = self.textures.remove(&key) {
-                log::debug!("Evicting cached texture: {}", key.display());
-                imgui_textures.remove(renderer, record.texture_id);
-            }
+        self.current_texture_id = Some(texture_id);
+    }
+
+    /// Release a texture immediately.
+    pub fn release_texture(
+        &mut self,
+        renderer: &mut imgui_wgpu::Renderer,
+        imgui_textures: &mut ImguiTextures,
+        texture_id: TextureId,
+    ) {
+        if self.current_texture_id == Some(texture_id) {
+            self.current_texture_id = None;
+        }
+        imgui_textures.remove(renderer, texture_id);
+    }
+
+    /// Release active texture if present.
+    pub fn clear_active_texture(
+        &mut self,
+        renderer: &mut imgui_wgpu::Renderer,
+        imgui_textures: &mut ImguiTextures,
+    ) {
+        if let Some(texture_id) = self.current_texture_id.take() {
+            imgui_textures.remove(renderer, texture_id);
         }
     }
 
     /// Free all GPU textures owned by this manager.
     pub fn clear(&mut self, renderer: &mut imgui_wgpu::Renderer, imgui_textures: &mut ImguiTextures) {
         self.pending = None;
-        self.textures.clear();
-        imgui_textures.clear(renderer);
+        self.clear_active_texture(renderer, imgui_textures);
     }
 }
 

@@ -303,15 +303,6 @@ async fn main() -> anyhow::Result<()> {
     let mut app_resources = AppResources::new(&device, &queue, &mut renderer)
         .context("failed to initialize global app resources")?;
 
-    let mut max_cache_size = app_state.config().texture_cache_max_entries;
-    if max_cache_size == 0 {
-        log::warn!(
-            "Invalid texture_cache_max_entries ({}). Falling back to 16",
-            max_cache_size
-        );
-        max_cache_size = 16;
-    }
-
     let mut image_cache_count = app_state.config().image_cache_count;
     if image_cache_count == 0 {
         log::warn!(
@@ -323,12 +314,11 @@ async fn main() -> anyhow::Result<()> {
 
     let max_texture_size = device.limits().max_texture_dimension_2d;
     let mut image_manager = ImageManager::new(image_cache_count);
-    let mut image_uploader = ImageUploader::new(max_texture_size, max_cache_size);
+    let mut image_uploader = ImageUploader::new(max_texture_size);
 
     log::info!(
-        "TextureManager created with max_texture_size: {}, max_texture_cache_size: {}, image_cache_count: {}",
+        "TextureManager created with max_texture_size: {}, image_cache_count: {}",
         max_texture_size,
-        max_cache_size,
         image_cache_count
     );
 
@@ -375,13 +365,7 @@ async fn main() -> anyhow::Result<()> {
                     // Reload current image/texture if someone requested it.
                     if app_state.take_reload_request() {
                         if let Some(entry) = app_state.current_entry() {
-                            // Fast path: texture already cached in GPU.
-                            if let Some(cached) = image_uploader.get_cached(&entry.path) {
-                                app_state.set_current_texture(Some(cached));
-                            } else {
-                                // Slow path: kick off background decode.
-                                image_uploader.request_decode(&entry.path, &mut image_manager);
-                            }
+                            image_uploader.request_decode(&entry.path, &mut image_manager);
                         } else {
                             // No image selected (e.g. directory changed). Cancel any stale decode.
                             image_uploader.cancel_pending();
@@ -402,8 +386,25 @@ async fn main() -> anyhow::Result<()> {
                             .current_entry()
                             .map_or(false, |e| e.path == decoded_path);
                         if is_current {
+                            if let Some(existing_texture) = app_state.current_texture() {
+                                image_uploader.release_texture(
+                                    &mut renderer,
+                                    &mut imgui_textures,
+                                    existing_texture.id,
+                                );
+                            }
+                            image_uploader.activate_texture(
+                                &mut renderer,
+                                &mut imgui_textures,
+                                uploaded.id,
+                            );
                             app_state.set_current_texture(Some(uploaded));
                         } else {
+                            image_uploader.release_texture(
+                                &mut renderer,
+                                &mut imgui_textures,
+                                uploaded.id,
+                            );
                             log::debug!(
                                 "Discarding stale decode result: {}",
                                 decoded_path.display()
