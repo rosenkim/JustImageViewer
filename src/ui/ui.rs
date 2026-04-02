@@ -246,6 +246,9 @@ pub fn render_ui(
         .build(|| {
             ui.text(format!("Status: {}", app_state.status_message()));
             ui.same_line();
+            if is_pending {
+                ui.text("| Loading...");
+            }
         });
 
     if app_state.show_keyboard_shortcuts() {
