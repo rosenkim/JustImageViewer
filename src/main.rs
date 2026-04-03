@@ -758,6 +758,7 @@ fn cleanup_on_exit(
     image_uploader.clear(renderer, imgui_textures);
     texture_atlas.clear(renderer, imgui_textures);
     app_resources.release(renderer);
+    imgui_textures.clear(renderer);
 }
 
 /// Try to restore the last directory from config.

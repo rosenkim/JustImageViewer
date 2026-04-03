@@ -41,6 +41,7 @@ pub fn render_ui(
         | imgui::WindowFlags::NO_BRING_TO_FRONT_ON_FOCUS;
 
     let mut clicked_index: Option<usize> = None;
+    let mut force_scroll_to_selected = false;
 
     let _style_token = ui.push_style_var(StyleVar::ItemSpacing([0.0, 0.0]));
 
@@ -124,11 +125,13 @@ pub fn render_ui(
                         let mut show_thumbnail = app_state.show_thumbnail();
                         if ui.checkbox("Thumbnail", &mut show_thumbnail) {
                             app_state.set_show_thumbnail(show_thumbnail);
+                            force_scroll_to_selected = true;
                         }
                         ui.same_line();
                         let mut show_grid_view = app_state.show_grid_view();
                         if ui.checkbox("Grid", &mut show_grid_view) {
                             app_state.set_show_grid_view(show_grid_view);
+                            force_scroll_to_selected = true;
                         }
                         ui.separator();
                         ui.child_window("library_scroll")
@@ -136,6 +139,9 @@ pub fn render_ui(
                             .build(|| {
                                 let mut pending_scroll_direction =
                                     app_state.take_pending_library_scroll_to_selection();
+                                if force_scroll_to_selected {
+                                    pending_scroll_direction = Some(0);
+                                }
                                 let items_per_row = calculate_library_items_per_row(ui, app_state);
                                 app_state.set_library_items_per_row(items_per_row);
 
@@ -233,7 +239,7 @@ pub fn render_ui(
                         ui.same_line();
 
                         ui.child_window("info_region").size([0.0, 0.0]).build(|| {
-                            render_file_info(ui, app_state);
+                            render_file_info(ui, app_state.current_entry());
                         });
                     }
                 });
@@ -395,12 +401,30 @@ fn render_main_menu_bar(ui: &imgui::Ui, app_state: &mut ViewerState, running: &m
     });
 }
 
-pub fn render_file_info(ui: &imgui::Ui, app_state: &ViewerState) {
-    if let Some(entry) = app_state.current_entry() {
+pub fn file_info_text(entry:Option<&MediaEntry>) -> String {
+    if let Some(entry) = entry {
+        let dimensions_text = match entry.dimensions {
+            Some((width, height)) => format!("{width} x {height}"),
+            None => "(Unknown)".to_owned(),
+        };
+
+        format!("{}\n{}\n{}\n{}",
+            entry.file_name,
+            entry.format.as_str(),
+            format_file_size(entry.file_size),
+            dimensions_text
+        )
+    } else {
+        "None".to_string()
+    }
+}
+
+pub fn render_file_info(ui: &imgui::Ui, entry:Option<&MediaEntry>) {
+    if let Some(entry) = entry {
         ui.text_wrapped(format!("File: {}", entry.file_name));
         ui.text(format!("Format: {}", entry.format.as_str()));
         ui.text(format!("Size: {}", format_file_size(entry.file_size)));
-        if let Some((w, h)) = app_state.current_image_size() {
+        if let Some((w, h)) = entry.dimensions {
             ui.text(format!("Resolution: {} x {}", w, h));
         }
     } else {
@@ -527,15 +551,10 @@ fn render_library_item_row(
             });
         ui.same_line();
 
-        let dimensions_text = match entry.dimensions {
-            Some((width, height)) => format!("- {width} x {height}"),
-            None => "- Unknown x Unknown".to_owned(),
-        };
-        let modified_date_text = format_modified_date("- ", entry.modified_time);
-        // Show file name + resolution + modified date in one selectable row.
+        let file_info = file_info_text(Some(entry));
         let selectable_label = format!(
-            "{}\n{}\n{}##library_item_{index}",
-            entry.file_name, dimensions_text, modified_date_text
+            "{}##library_item_{index}",
+            file_info
         );
         return ui
             .selectable_config(&selectable_label)
@@ -606,21 +625,14 @@ fn render_library_grid(
         ui.table_setup_column(&format!("col_{i}"));
     }
 
-    let items: Vec<(usize, String, Option<crate::core::media::ThumbnailInfo>)> = app_state
-        .media_items()
-        .iter()
-        .enumerate()
-        .map(|(i, e)| (i, e.file_name.clone(), e.thumbnail.clone()))
-        .collect();
-
-    for (index, file_name, thumbnail) in &items {
+    for (index, entry) in app_state.media_items().iter().enumerate() {
         let col = index % cols;
         if col == 0 {
             ui.table_next_row();
         }
         ui.table_set_column_index(col);
 
-        let is_selected = app_state.current_index() == Some(*index);
+        let is_selected = app_state.current_index() == Some(index);
         let selectable_id = format!("##grid_item_{index}");
 
         // Record top-left of this cell before drawing
@@ -634,13 +646,17 @@ fn render_library_grid(
             .size([cell, cell_h])
             .build()
         {
-            clicked = Some(*index);
+            clicked = Some(index);
         }
-        handle_scroll_to_selected(ui, current_index, *index, pending_scroll_direction);
+        handle_scroll_to_selected(ui, current_index, index, pending_scroll_direction);
+        if ui.is_item_hovered() {
+            let text = file_info_text(Some(entry));
+            ui.tooltip_text(text);
+        }
 
         // Draw thumbnail image or placeholder on top via draw_list
         if show_thumbnail {
-            let (texture_id, uvs, img_w, img_h) = if let Some(thumb) = thumbnail {
+            let (texture_id, uvs, img_w, img_h) = if let Some(thumb) = &entry.thumbnail {
                 let (w, h) = thumb.image_size;
                 (thumb.texture_index, thumb.uvs, w, h)
             } else {
@@ -671,12 +687,12 @@ fn render_library_grid(
         ui.set_cursor_pos(label_pos);
         let label_w = cell - 4.0;
         if show_thumbnail {
-            let display_name = wrap_text_to_width_and_lines(ui, file_name, label_w, 1);
+            let display_name = wrap_text_to_width_and_lines(ui, &entry.file_name, label_w, 1);
             ui.text(&display_name);
         } else {
             let line_h = ui.frame_height_with_spacing().max(1.0);
             let max_lines = ((LIBRARY_THUMBNAIL_SIZE - 4.0) / line_h).floor().max(1.0) as usize;
-            let display_name = wrap_text_to_width_and_lines(ui, file_name, label_w, max_lines);
+            let display_name = wrap_text_to_width_and_lines(ui, &entry.file_name, label_w, max_lines);
             ui.text(&display_name);
         }
     }
