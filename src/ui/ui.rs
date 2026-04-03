@@ -3,9 +3,7 @@ use crate::core::media::MediaEntry;
 use crate::infra::config::BackgroundMode;
 use crate::math::{Point2D, Rect2D};
 use crate::render::app_resources::AppResources;
-use chrono::{DateTime, Local, Utc};
-use imgui::{Condition, ImColor32, MouseCursor, StyleVar, TableFlags, Ui};
-use std::time::Duration;
+use imgui::{Condition, ImColor32, MouseButton, MouseCursor, StyleVar, TableFlags, Ui};
 
 use super::helper::render_image_selection_widget;
 use super::keyboard_shortcuts_window::render_keyboard_shortcuts_window;
@@ -512,6 +510,27 @@ fn render_selection_window(ui: &Ui, app_state: &mut ViewerState) {
     app_state.set_show_selection_window(open);
 }
 
+/// Resolve the thumbnail texture info for an entry, falling back to the empty icon.
+fn resolve_thumbnail<'a>(
+    entry: &'a MediaEntry,
+    app_resources: &'a AppResources,
+) -> (imgui::TextureId, [f32; 4], u32, u32) {
+    if let Some(thumbnail) = &entry.thumbnail {
+        let (w, h) = thumbnail.image_size;
+        (thumbnail.texture_index, thumbnail.uvs, w, h)
+    } else {
+        let region = &app_resources.empty_icon_region;
+        let (w, h) = region.image_size;
+        (region.texture_id, region.uvs, w, h)
+    }
+}
+
+/// Fit-scale a source image into a square cell of `cell` pixels.
+fn fit_scale_in_cell(img_w: u32, img_h: u32, cell: f32) -> (f32, f32) {
+    let scale = (cell / img_w as f32).min(cell / img_h as f32);
+    (img_w as f32 * scale, img_h as f32 * scale)
+}
+
 fn render_library_item_row(
     ui: &Ui,
     app_state: &ViewerState,
@@ -523,22 +542,14 @@ fn render_library_item_row(
     let thumbnail_size_xy = [LIBRARY_THUMBNAIL_SIZE, LIBRARY_THUMBNAIL_SIZE];
     if app_state.show_thumbnail() {
         let image_view_id = format!("thumbnail_image_view_{index}");
+        let mut thumbnail_clicked = false;
         ui.child_window(&image_view_id)
             .size(thumbnail_size_xy)
             .border(false)
             .build(|| {
                 let cell = LIBRARY_THUMBNAIL_SIZE;
-                let (texture_id, uvs, img_w, img_h) = if let Some(thumbnail) = &entry.thumbnail {
-                    let (w, h) = thumbnail.image_size;
-                    (thumbnail.texture_index, thumbnail.uvs, w, h)
-                } else {
-                    let region = &app_resources.empty_icon_region;
-                    let (w, h) = region.image_size;
-                    (region.texture_id, region.uvs, w, h)
-                };
-                let scale = (cell / img_w as f32).min(cell / img_h as f32);
-                let draw_w = img_w as f32 * scale;
-                let draw_h = img_h as f32 * scale;
+                let (texture_id, uvs, img_w, img_h) = resolve_thumbnail(entry, app_resources);
+                let (draw_w, draw_h) = fit_scale_in_cell(img_w, img_h, cell);
                 let cursor = ui.cursor_pos();
                 ui.set_cursor_pos([
                     cursor[0] + (cell - draw_w) * 0.5,
@@ -548,15 +559,16 @@ fn render_library_item_row(
                     .uv0([uvs[0], uvs[1]])
                     .uv1([uvs[2], uvs[3]])
                     .build(ui);
+
+                if ui.is_window_hovered() && ui.is_mouse_clicked(MouseButton::Left) {
+                    thumbnail_clicked = true;
+                }
             });
         ui.same_line();
 
         let file_info = file_info_text(Some(entry));
-        let selectable_label = format!(
-            "{}##library_item_{index}",
-            file_info
-        );
-        return ui
+        let selectable_label = format!("{}##library_item_{index}", file_info);
+        let text_clicked = ui
             .selectable_config(&selectable_label)
             .selected(app_state.current_index() == Some(index))
             .size([
@@ -564,6 +576,7 @@ fn render_library_item_row(
                 thumbnail_size_xy[1],
             ])
             .build();
+        return thumbnail_clicked || text_clicked;
     } else {
         ui.selectable_config(&entry.file_name)
             .selected(app_state.current_index() == Some(index))
@@ -656,18 +669,8 @@ fn render_library_grid(
 
         // Draw thumbnail image or placeholder on top via draw_list
         if show_thumbnail {
-            let (texture_id, uvs, img_w, img_h) = if let Some(thumb) = &entry.thumbnail {
-                let (w, h) = thumb.image_size;
-                (thumb.texture_index, thumb.uvs, w, h)
-            } else {
-                let region = &app_resources.empty_icon_region;
-                let (w, h) = region.image_size;
-                (region.texture_id, region.uvs, w, h)
-            };
-            let scale =
-                (LIBRARY_THUMBNAIL_SIZE / img_w as f32).min(LIBRARY_THUMBNAIL_SIZE / img_h as f32);
-            let draw_w = img_w as f32 * scale;
-            let draw_h = img_h as f32 * scale;
+            let (texture_id, uvs, img_w, img_h) = resolve_thumbnail(entry, app_resources);
+            let (draw_w, draw_h) = fit_scale_in_cell(img_w, img_h, LIBRARY_THUMBNAIL_SIZE);
             let img_x = cell_origin[0] + ((cell - draw_w) * 0.5).max(0.0);
             let img_y = cell_origin[1] + ((LIBRARY_THUMBNAIL_SIZE - draw_h) * 0.5).max(0.0);
             ui.get_window_draw_list()
@@ -678,23 +681,18 @@ fn render_library_grid(
         }
 
         // Draw file name label below the thumbnail (or at top if no thumbnail)
-        let label_y_offset = if show_thumbnail {
-            LIBRARY_THUMBNAIL_SIZE
-        } else {
-            0.0
-        };
+        let label_y_offset = if show_thumbnail { LIBRARY_THUMBNAIL_SIZE } else { 0.0 };
         let label_pos = [cursor_pos[0] + 2.0, cursor_pos[1] + label_y_offset + 2.0];
         ui.set_cursor_pos(label_pos);
         let label_w = cell - 4.0;
-        if show_thumbnail {
-            let display_name = wrap_text_to_width_and_lines(ui, &entry.file_name, label_w, 1);
-            ui.text(&display_name);
+        let max_lines = if show_thumbnail {
+            1
         } else {
             let line_h = ui.frame_height_with_spacing().max(1.0);
-            let max_lines = ((LIBRARY_THUMBNAIL_SIZE - 4.0) / line_h).floor().max(1.0) as usize;
-            let display_name = wrap_text_to_width_and_lines(ui, &entry.file_name, label_w, max_lines);
-            ui.text(&display_name);
-        }
+            ((LIBRARY_THUMBNAIL_SIZE - 4.0) / line_h).floor().max(1.0) as usize
+        };
+        let display_name = wrap_text_to_width_and_lines(ui, &entry.file_name, label_w, max_lines);
+        ui.text(&display_name);
     }
 
     clicked
@@ -788,20 +786,6 @@ fn property_grid_float_row(ui: &Ui, name: &str, id: &str, value: &mut f32) -> bo
     ui.table_next_column();
     ui.set_next_item_width(-1.0);
     ui.input_float(id, value).display_format("%.1f").build()
-}
-
-fn format_modified_date(prefix: &str, modified_time: Duration) -> String {
-    let Ok(seconds) = i64::try_from(modified_time.as_secs()) else {
-        return format!("{}Unknown", prefix);
-    };
-
-    // Convert unix seconds to local time text for list UI.
-    let Some(utc_time) = DateTime::<Utc>::from_timestamp(seconds, 0) else {
-        return format!("{}Unknown", prefix);
-    };
-
-    let local_time = utc_time.with_timezone(&Local);
-    format!("{}{}", prefix, local_time.format("%Y-%m-%d %H:%M"))
 }
 
 fn clamp_selection_rect_to_image(rect: Rect2D, image_size: [f32; 2]) -> Rect2D {
