@@ -1,13 +1,12 @@
 use crate::app::{ImageSelectionDragMode, ImageSelectionResizeHandle, ViewerState};
 use crate::math::{Point2D, Rect2D};
 use imgui::{ImColor32, Key, MouseButton, MouseCursor, Ui};
+use super::layout_constants::{
+    MIN_SELECTION_SIZE, SELECTION_DASH_LENGTH, SELECTION_GAP_LENGTH,
+    SELECTION_LINE_THICKNESS, SELECTION_RESIZE_HIT_PADDING,
+};
 
 const SELECTION_POPUP_ID: &str = "image_selection_popup";
-const SELECTION_DASH_LENGTH: f32 = 8.0;
-const SELECTION_GAP_LENGTH: f32 = 6.0;
-const SELECTION_LINE_THICKNESS: f32 = 1.5;
-const MIN_SELECTION_SIZE: f32 = 1.0;
-const SELECTION_RESIZE_HIT_PADDING: f32 = 8.0;
 
 struct SelectionPopupItem {
     name: &'static str,

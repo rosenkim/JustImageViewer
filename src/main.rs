@@ -1,6 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod app;
+mod constants;
 mod core;
 mod infra;
 mod math;
@@ -27,14 +28,14 @@ use winit::{
 };
 
 use crate::core::image_manager::ImageManager;
+use crate::infra::config::AppTheme;
 use crate::render::app_resources::AppResources;
 use crate::render::imgui_textures::ImguiTextures;
 use crate::render::texture_atlas_manager::TextureAtlasManager;
 use crate::render::image_uploader::ImageUploader;
 use crate::ui::render_ui;
 
-const LOGICAL_DPI: f32 = 96.0;
-const POINTS_PER_INCH: f32 = 72.0;
+use crate::constants::{LOGICAL_DPI, POINTS_PER_INCH};
 
 #[derive(Debug, Default)]
 struct AppArgs {
@@ -56,6 +57,14 @@ fn compute_font_global_scale(ui_scale_factor: f32, hidpi_factor: f32) -> f32 {
         ui_scale_factor / hidpi_factor
     } else {
         ui_scale_factor
+    }
+}
+
+fn apply_imgui_theme(style: &mut imgui::Style, theme: AppTheme) {
+    match theme {
+        AppTheme::Dark => { style.use_dark_colors(); }
+        AppTheme::Light => { style.use_light_colors(); }
+        AppTheme::Classic => { style.use_classic_colors(); }
     }
 }
 
@@ -135,19 +144,21 @@ async fn main() -> anyhow::Result<()> {
         app_state.config().focused_fps
     } else {
         log::warn!(
-            "Invalid focused_fps ({}). Falling back to 60",
-            app_state.config().focused_fps
+            "Invalid focused_fps ({}). Falling back to {}",
+            app_state.config().focused_fps,
+            constants::DEFAULT_FOCUSED_FPS
         );
-        60
+        constants::DEFAULT_FOCUSED_FPS
     };
     let unfocused_fps = if app_state.config().unfocused_fps > 0 {
         app_state.config().unfocused_fps
     } else {
         log::warn!(
-            "Invalid unfocused_fps ({}). Falling back to 5",
-            app_state.config().unfocused_fps
+            "Invalid unfocused_fps ({}). Falling back to {}",
+            app_state.config().unfocused_fps,
+            constants::DEFAULT_UNFOCUSED_FPS
         );
-        5
+        constants::DEFAULT_UNFOCUSED_FPS
     };
 
 
@@ -207,27 +218,31 @@ async fn main() -> anyhow::Result<()> {
 
     let mut imgui = ImguiContext::create();
     imgui.set_ini_filename(None);
-    imgui.style_mut().use_dark_colors();
+    let imgui_theme = app_state.config().imgui_theme;
+    apply_imgui_theme(imgui.style_mut(), imgui_theme);
+    log::info!("Applied ImGui {:?} theme", imgui_theme);
 
     let ui_font_filename = app_state.config().ui_font_filename.clone();
     let ui_font_size_pt = if app_state.config().ui_font_size_pt > 0.0 {
         app_state.config().ui_font_size_pt
     } else {
         log::warn!(
-            "Invalid ui_font_size_pt ({}). Falling back to 10.5",
-            app_state.config().ui_font_size_pt
+            "Invalid ui_font_size_pt ({}). Falling back to {}",
+            app_state.config().ui_font_size_pt,
+            constants::DEFAULT_UI_FONT_SIZE_PT
         );
-        10.5
+        constants::DEFAULT_UI_FONT_SIZE_PT
     };
 
     let ui_scale_factor = if app_state.config().ui_scale_factor > 0.0 {
         app_state.config().ui_scale_factor
     } else {
         log::warn!(
-            "Invalid ui_scale_factor ({}). Falling back to 1.0",
-            app_state.config().ui_scale_factor
+            "Invalid ui_scale_factor ({}). Falling back to {}",
+            app_state.config().ui_scale_factor,
+            constants::DEFAULT_UI_SCALE_FACTOR
         );
-        1.0
+        constants::DEFAULT_UI_SCALE_FACTOR
     };
 
     let mut platform = WinitPlatform::init(&mut imgui);
@@ -236,6 +251,7 @@ async fn main() -> anyhow::Result<()> {
     let hidpi_factor = window.scale_factor() as f32;
     let font_scale = compute_font_global_scale(ui_scale_factor, hidpi_factor);
     let ui_font_size_logical_px = points_to_logical_pixels(ui_font_size_pt);
+    let framebuffer_font_size = ui_font_size_logical_px * hidpi_factor.max(1.0);
 
     imgui.io_mut().font_global_scale = font_scale;
     log::info!(
@@ -266,6 +282,7 @@ async fn main() -> anyhow::Result<()> {
         font_candidates.iter().find(|path| path.exists()).cloned()
     };
 
+    let mut custom_font_added = false;
     if let Some(font_path) = font_path {
         let font_data = std::fs::read(&font_path).expect("failed to read custom font file");
         // Leak the data so it lives for the entire program lifetime.
@@ -273,11 +290,9 @@ async fn main() -> anyhow::Result<()> {
         let font_data: &'static [u8] = Box::leak(font_data.into_boxed_slice());
         // Convert pt -> logical px (96 DPI) -> framebuffer px.
         // This keeps font sizing stable across font changes and DPI.
-        let font_size = ui_font_size_logical_px * hidpi_factor.max(1.0);
-
         imgui.fonts().add_font(&[FontSource::TtfData {
             data: font_data,
-            size_pixels: font_size,
+            size_pixels: framebuffer_font_size,
             config: Some(FontConfig {
                 glyph_ranges: FontGlyphRanges::from_slice(&[
                     // Basic Latin + Latin Supplement
@@ -291,12 +306,13 @@ async fn main() -> anyhow::Result<()> {
                 ..FontConfig::default()
             }),
         }]);
+        custom_font_added = true;
         log::info!(
             "Custom font loaded: {} ({:.2} pt -> {:.2} logical px -> {:.2} framebuffer px, scale: {:.2})",
             font_path.display(),
             ui_font_size_pt,
             ui_font_size_logical_px,
-            font_size,
+            framebuffer_font_size,
             hidpi_factor
         );
     } else {
@@ -308,6 +324,21 @@ async fn main() -> anyhow::Result<()> {
         log::warn!(
             "Custom font not found. checked paths: {}. using default imgui font",
             checked_paths
+        );
+    }
+
+    if !custom_font_added {
+        imgui.fonts().add_font(&[FontSource::DefaultFontData {
+            config: Some(FontConfig {
+                size_pixels: framebuffer_font_size,
+                ..FontConfig::default()
+            }),
+        }]);
+        log::info!(
+            "Configured ImGui default font ({:.2} pt -> {:.2} logical px -> {:.2} framebuffer px)",
+            ui_font_size_pt,
+            ui_font_size_logical_px,
+            framebuffer_font_size
         );
     }
 
@@ -324,10 +355,11 @@ async fn main() -> anyhow::Result<()> {
     let mut image_cache_count = app_state.config().image_cache_count;
     if image_cache_count == 0 {
         log::warn!(
-            "Invalid image_cache_count ({}). Falling back to 32",
-            image_cache_count
+            "Invalid image_cache_count ({}). Falling back to {}",
+            image_cache_count,
+            constants::DEFAULT_IMAGE_CACHE_COUNT
         );
-        image_cache_count = 32;
+        image_cache_count = constants::DEFAULT_IMAGE_CACHE_COUNT;
     }
 
     let max_texture_size = device.limits().max_texture_dimension_2d;
@@ -761,15 +793,17 @@ fn cleanup_on_exit(
     imgui_textures.clear(renderer);
 }
 
-/// Try to restore the last directory from config.
+/// Try to restore the last open file from config.
 fn restore_last_directory_if_needed(app_state: &mut ViewerState) {
-    if let Some(directory) = app_state.restore_candidate().map(PathBuf::from) {
-        if directory.is_dir() {
-            app_state.load_directory(directory, None);
+    if let Some(file_path) = app_state.restore_candidate().map(PathBuf::from) {
+        if file_path.is_file() {
+            if let Some(parent) = file_path.parent().map(PathBuf::from) {
+                app_state.load_directory(parent, Some(file_path));
+            }
         } else {
             log::warn!(
-                "Configured last_open_directory is not a directory: {}",
-                directory.display()
+                "Configured last_open_file is not a file: {}",
+                file_path.display()
             );
         }
     }

@@ -7,16 +7,13 @@ use imgui::{Condition, ImColor32, MouseButton, MouseCursor, StyleVar, TableFlags
 
 use super::helper::render_image_selection_widget;
 use super::keyboard_shortcuts_window::render_keyboard_shortcuts_window;
+use super::layout_constants::{
+    CHECKER_TILE_SIZE, GRID_CELL_SIZE, LIBRARY_THUMBNAIL_SIZE, MIN_LIBRARY_WIDTH,
+    MIN_SELECTION_SIZE, MIN_VIEWER_WIDTH, SPLITTER_WIDTH,
+};
 
-const SPLITTER_WIDTH: f32 = 6.0;
-const MIN_LIBRARY_WIDTH: f32 = 220.0;
-const MIN_VIEWER_WIDTH: f32 = 280.0;
 const LIBRARY_SORT_FIELDS: [&str; 3] = ["Name", "Date", "Size"];
 const LIBRARY_SORT_DIRECTIONS: [&str; 2] = ["Ascending", "Descending"];
-const LIBRARY_THUMBNAIL_SIZE: f32 = 96.0;
-const GRID_CELL_SIZE: f32 = LIBRARY_THUMBNAIL_SIZE + 16.0;
-const MIN_SELECTION_SIZE: f32 = 1.0;
-const CHECKER_TILE_SIZE: f32 = 64.0;
 
 pub fn render_ui(
     ui: &imgui::Ui,
@@ -28,9 +25,9 @@ pub fn render_ui(
     render_main_menu_bar(ui, app_state, running);
 
     let display = ui.io().display_size;
-    // Use current frame metrics so layout follows the real font size.
-    let menu_height = ui.frame_height_with_spacing();
-    let status_height = ui.frame_height_with_spacing() + 6.0;
+    // Compute heights using the effective font size so scaled fonts keep layout tight.
+    let menu_height = scaled_frame_height(ui);
+    let status_height = scaled_frame_height_with_spacing(ui) + scaled_constant(ui, 6.0);
     let content_height = (display[1] - menu_height - status_height).max(120.0);
     let window_flags = imgui::WindowFlags::NO_MOVE
         | imgui::WindowFlags::NO_RESIZE
@@ -777,6 +774,23 @@ fn wrap_text_to_width_and_lines(ui: &Ui, text: &str, max_width: f32, max_lines: 
     }
 
     lines.join("\n")
+}
+
+fn scaled_frame_height(ui: &Ui) -> f32 {
+    scale_with_font_global(ui, ui.frame_height())
+}
+
+fn scaled_frame_height_with_spacing(ui: &Ui) -> f32 {
+    scale_with_font_global(ui, ui.frame_height_with_spacing())
+}
+
+fn scaled_constant(ui: &Ui, value: f32) -> f32 {
+    scale_with_font_global(ui, value)
+}
+
+fn scale_with_font_global(ui: &Ui, value: f32) -> f32 {
+    let scale = ui.io().font_global_scale.max(0.01);
+    value * scale
 }
 
 fn property_grid_float_row(ui: &Ui, name: &str, id: &str, value: &mut f32) -> bool {

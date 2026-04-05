@@ -2,14 +2,16 @@
 # Copy is automatically created in the platform config directory on first launch.
 
 restore_last_directory = true
-# last_open_directory is managed by the app and populated after opening a directory.
+# last_open_file is managed by the app and stores the last selected file path.
 # slideshow_interval_secs = 5
-# Font file name under assets/fonts
-ui_font_filename = "NanumGothic.ttf"
+# Font file name under assets/fonts (leave empty for built-in ImGui font)
+ui_font_filename = ""
 # UI font size in points (pt)
 ui_font_size_pt = 10.5
 #! Global UI scale factor (1.0 = 100%)
 ui_scale_factor = 1.0
+# ImGui theme: "dark", "light", or "classic"
+imgui_theme = "dark"
 # UI layout + viewing options persisted between runs
 show_library = true
 show_info = true

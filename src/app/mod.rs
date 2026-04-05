@@ -229,7 +229,7 @@ impl ViewerState {
         if !self.config.restore_last_directory {
             return None;
         }
-        self.config.last_open_directory.as_deref()
+        self.config.last_open_file.as_deref()
     }
 
     pub fn config(&self) -> &AppConfig {
@@ -362,11 +362,13 @@ impl ViewerState {
 
     pub fn select_index(&mut self, index: usize) {
         if index < self.media_items.len() {
+            let delta = index as i32 - self.current_index.unwrap_or(0) as i32;
             self.current_index = Some(index);
             self.needs_image_reload = true;
             self.pending_library_scroll_to_selection = true;
-            self.pending_library_scroll_direction = 0;
+            self.pending_library_scroll_direction = delta.signum();
             self.clear_image_selection_state();
+            self.sync_last_open_file();
         }
     }
 
@@ -381,11 +383,7 @@ impl ViewerState {
 
         let next = ((current as i32 + delta).rem_euclid(total as i32)) as usize;
         if next != current {
-            self.current_index = Some(next);
-            self.needs_image_reload = true;
-            self.pending_library_scroll_to_selection = true;
-            self.pending_library_scroll_direction = delta.signum();
-            self.clear_image_selection_state();
+            self.select_index(next);
         }
     }
 
@@ -601,7 +599,7 @@ impl ViewerState {
                         "No supported images in {} (PNG, JPEG, BMP, GIF, WebP, TIFF, TGA, ICO, PNM, DDS, Farbfeld)",
                         directory_display
                     );
-                    self.config.last_open_directory = Some(directory.clone());
+                    self.config.last_open_file = None;
                     self.current_directory = Some(directory);
                     self.media_items.clear();
                     self.current_index = None;
@@ -611,7 +609,6 @@ impl ViewerState {
                     return;
                 }
 
-                self.config.last_open_directory = Some(directory.clone());
                 self.current_directory = Some(directory);
                 self.media_items = entries;
                 self.sort_media_items();
@@ -624,9 +621,15 @@ impl ViewerState {
                     })
                     .or(Some(0));
                 self.current_index = focus_index;
+                self.config.last_open_file = self
+                    .current_index
+                    .and_then(|i| self.media_items.get(i))
+                    .map(|e| e.path.clone());
                 self.current_image_size = None;
                 self.status_message = format!("Loaded {} images from {}", total, directory_display);
                 self.needs_image_reload = true;
+                self.pending_library_scroll_to_selection = true;
+                self.pending_library_scroll_direction = 0;
                 self.clear_image_selection_state();
 
                 // spawn thumbnails work
@@ -670,7 +673,7 @@ impl ViewerState {
             .ok()
             .map(|(width, height)| (width as usize, height as usize));
 
-        self.config.last_open_directory = Some(directory.clone());
+        self.config.last_open_file = Some(file_path.clone());
         self.current_directory = Some(directory);
         self.media_items = vec![MediaEntry {
             path: file_path.clone(),
@@ -736,6 +739,14 @@ impl ViewerState {
                 .iter()
                 .position(|entry| &entry.path == target)
         });
+        self.sync_last_open_file();
+    }
+
+    fn sync_last_open_file(&mut self) {
+        self.config.last_open_file = self
+            .current_index
+            .and_then(|i| self.media_items.get(i))
+            .map(|entry| entry.path.clone());
     }
 
     pub fn copy_region_to_clipboard(&self, selection: Option<Rect2D>) {

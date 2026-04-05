@@ -8,27 +8,27 @@ use directories::BaseDirs;
 use serde::{Deserialize, Serialize};
 
 use crate::app::{ImageViewMode, LibrarySortField, SortDirection};
+use crate::constants::{DEFAULT_BACKGROUND_COLOR1, DEFAULT_BACKGROUND_COLOR2, LOGICAL_DPI, POINTS_PER_INCH};
+use crate::constants::{DEFAULT_FOCUSED_FPS, DEFAULT_UNFOCUSED_FPS, DEFAULT_IMAGE_CACHE_COUNT, DEFAULT_UI_FONT_SIZE_PT, DEFAULT_UI_SCALE_FACTOR, DEFAULT_LIBRARY_WIDTH};
 
-const QUALIFIER: &str = "dev";
-const ORGANIZATION: &str = "Vibe";
-const APPLICATION: &str = "ImageViewer";
+const QUALIFIER: &str = "com";
+const ORGANIZATION: &str = "kim";
+const APPLICATION: &str = "VibeImageViewer";
 const CONFIG_FILENAME: &str = "settings.toml";
-const DEFAULT_BACKGROUND_COLOR1: &str = "#CCCCCC";
-const DEFAULT_BACKGROUND_COLOR2: &str = "#FFFFFF";
-const LOGICAL_DPI: f32 = 96.0;
-const POINTS_PER_INCH: f32 = 72.0;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct AppConfig {
     #[serde(alias = "restore_last_folder")]
     pub restore_last_directory: bool,
-    #[serde(alias = "last_open_folder")]
-    pub last_open_directory: Option<PathBuf>,
+    #[serde(alias = "last_open_folder", alias = "last_open_directory")]
+    pub last_open_file: Option<PathBuf>,
     pub ui_font_filename: String,
     #[serde(alias = "ui_font_size_pixels")]
     pub ui_font_size_pt: f32,
     pub ui_scale_factor: f32,
+    #[serde(alias = "imgui_style")]
+    pub imgui_theme: AppTheme,
     pub background_style: BackgroundStyle,
     pub image_cache_count: usize,
     pub focused_fps: u32,
@@ -45,23 +45,38 @@ pub struct AppConfig {
     pub show_grid_view: bool,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum AppTheme {
+    Dark,
+    Light,
+    Classic,
+}
+
+impl Default for AppTheme {
+    fn default() -> Self {
+        AppTheme::Dark
+    }
+}
+
 impl Default for AppConfig {
     fn default() -> Self {
         Self {
             restore_last_directory: true,
-            last_open_directory: None,
+            last_open_file: None,
             ui_font_filename: String::new(),
             // 10.5pt maps to about 14px at 96 DPI.
-            ui_font_size_pt: 10.5,
-            ui_scale_factor: 1.0,
+            ui_font_size_pt: DEFAULT_UI_FONT_SIZE_PT,
+            ui_scale_factor: DEFAULT_UI_SCALE_FACTOR,
+            imgui_theme: AppTheme::default(),
             background_style: BackgroundStyle::default(),
-            image_cache_count: 32,
-            focused_fps: 60,
-            unfocused_fps: 5,
+            image_cache_count: DEFAULT_IMAGE_CACHE_COUNT,
+            focused_fps: DEFAULT_FOCUSED_FPS,
+            unfocused_fps: DEFAULT_UNFOCUSED_FPS,
             show_library: true,
             show_info: true,
             show_selection_window: false,
-            library_width: 300.0,
+            library_width: DEFAULT_LIBRARY_WIDTH,
             image_view_mode: ImageViewMode::FitToWindow,
             library_sort_field: LibrarySortField::Name,
             sort_direction: SortDirection::Ascending,
@@ -189,7 +204,7 @@ pub fn config_dir() -> Result<PathBuf> {
 
     Ok(base_dirs
         .home_dir()
-        .join(format!("{QUALIFIER}.{ORGANIZATION}.{APPLICATION}")))
+        .join(format!(".{APPLICATION}")))
 }
 
 /// Save current config state back to disk.
@@ -203,14 +218,6 @@ fn default_template() -> &'static str {
     include_str!("../../config/default_settings.toml")
 }
 
-fn toml_number_to_f32(value: &toml::Value) -> Option<f32> {
-    if let Some(v) = value.as_float() {
-        return Some(v as f32);
-    }
-
-    value.as_integer().map(|v| v as f32)
-}
-
 fn default_background_color1() -> String {
     DEFAULT_BACKGROUND_COLOR1.to_owned()
 }
@@ -219,6 +226,15 @@ fn default_background_color2() -> String {
     DEFAULT_BACKGROUND_COLOR2.to_owned()
 }
 
+fn toml_number_to_f32(value: &toml::Value) -> Option<f32> {
+    if let Some(v) = value.as_float() {
+        return Some(v as f32);
+    }
+
+    value.as_integer().map(|v| v as f32)
+}
+
+
 fn normalize_background_style(style: &mut BackgroundStyle) {
     if parse_hex_rgb(&style.color1).is_none() {
         log::warn!(
@@ -226,7 +242,7 @@ fn normalize_background_style(style: &mut BackgroundStyle) {
             style.color1,
             DEFAULT_BACKGROUND_COLOR1
         );
-        style.color1 = default_background_color1();
+        style.color1 = DEFAULT_BACKGROUND_COLOR1.to_owned();
     }
 
     if parse_hex_rgb(&style.color2).is_none() {
@@ -235,7 +251,7 @@ fn normalize_background_style(style: &mut BackgroundStyle) {
             style.color2,
             DEFAULT_BACKGROUND_COLOR2
         );
-        style.color2 = default_background_color2();
+        style.color2 = DEFAULT_BACKGROUND_COLOR2.to_owned();
     }
 }
 

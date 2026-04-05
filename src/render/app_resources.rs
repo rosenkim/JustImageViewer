@@ -1,7 +1,6 @@
 use std::path::Path;
 
 use anyhow::{Context, Result};
-use imgui::TextureId;
 use imgui_wgpu::Renderer;
 use wgpu::{Device, Queue};
 
@@ -10,7 +9,6 @@ use super::texture_atlas_manager::{TextureAtlasManager, AtlasRegion};
 use super::imgui_textures::ImguiTextures;
 
 pub struct AppResources {
-    pub empty_icon_texture_id: TextureId,
     pub empty_icon_region: AtlasRegion,
     texture_atlas_manager: TextureAtlasManager,
     imgui_textures: ImguiTextures,
@@ -43,10 +41,7 @@ impl AppResources {
             &decoded.pixels,
         )?;
 
-        let empty_icon_texture_id = empty_icon_region.texture_id;
-
         Ok(Self {
-            empty_icon_texture_id,
             empty_icon_region,
             texture_atlas_manager,
             imgui_textures,

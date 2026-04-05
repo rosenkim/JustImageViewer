@@ -8,6 +8,7 @@ use std::{
     time::Duration,
 };
 
+use crate::constants::MAX_DECODE_SPAWNS;
 use crate::core::image_loader::DecodedImage;
 use crate::core::image_manager::ImageManager;
 use crate::render::imgui_textures::ImguiTextures;
@@ -15,8 +16,6 @@ use anyhow::Result;
 use imgui::TextureId;
 use tokio::sync::oneshot;
 use wgpu::{Device, Queue};
-
-const MAX_DECODE_SPAWNS: isize = 5;
 static ACTIVE_DECODE_SPAWNS: AtomicIsize = AtomicIsize::new(0);
 
 pub struct UploadedTexture {
