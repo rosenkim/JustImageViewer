@@ -1,3 +1,5 @@
+[한국어](./README_KR.md)
+
 # Vibe Image Viewer
 
 I started creating this because I needed an image viewer that I could use on both my Windows PC and Mac, and that I could easily extend with new features. I also wanted to test the capabilities of Codex.
@@ -10,7 +12,7 @@ It has a limitation dependent on the GPU's maximum texture size, but it is not a
 
 Tested and in use on Windows 11 and Apple Silicon Mac.
 
-## Tools Used
+## Development Tools
 
 - Codex and Windsurf
 
@@ -35,6 +37,13 @@ To run:
 ```sh
 git clone
 cargo run
+```
+
+Package build
+
+```sh
+cargo install cargo-packager
+cargo packager
 ```
 
 ## Command-line Options
