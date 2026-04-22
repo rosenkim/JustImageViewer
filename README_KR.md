@@ -1,12 +1,14 @@
-# Vibe Image Viewer
+[English](README.md) | [한국어](README_KR.md)
+
+# Just Image Viewer
 
 내가 사용하는 Windows PC와 Mac에서 같이 사용할 수 있고 내가 쉽게 기능을 확장할 수 있는 이미지 뷰어가 필요해서 만들기 시작. 거기에 Codex의 능력도 확인해보고 싶었다.
 
 Rust,winit,wgpu,imgui-rs를 사용하여 만든 이미지 뷰어
 cross platform 을 지원
-GPU의 최대 Texture Size에 의존하는 한계가 있으나 크게 불편하지 않음
+GPU의 최대 Texture Size에 의존하는 한계가 있다
 
-[ScreenShot]
+![screenshot](screenshot.jpg)
 
 Windows 11,Apple Silicon Mac 에서 테스트 및 사용 중
 
@@ -71,8 +73,12 @@ cargo packager
 
 설정은 사용자 홈 디렉터리 아래에 저장됩니다.
 
-- macOS / Linux: `~/.VibeImageViewer/settings.toml`
-- Windows: `%USERPROFILE%/.VibeImageViewer/settings.toml`
+- macOS / Linux: `~/.justImageViewer/settings.toml`
+- Windows: `%USERPROFILE%/.justImageViewer/settings.toml`
+
+## 커스텀 폰트 파일 위치
+
+커스텀 폰트는 설정파일 위치 또는 설정 파일 위치 아래의 fonts 디렉토리에 있어야 한다.
 
 ## 참고
 

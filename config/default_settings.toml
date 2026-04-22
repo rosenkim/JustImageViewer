@@ -1,4 +1,4 @@
-# Vibe Image Viewer — default configuration
+# Just Image Viewer — default configuration
 # Copy is automatically created in the platform config directory on first launch.
 
 restore_last_directory = true

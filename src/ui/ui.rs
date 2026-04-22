@@ -875,7 +875,7 @@ fn render_image_content(ui: &imgui::Ui, app_state: &mut ViewerState, is_pending:
     } else if app_state.current_directory().is_some() {
         ui.text("No image selected or decode failed.");
     } else {
-        ui.text("Welcome to Vibe Image Viewer");
+        ui.text("Welcome to Just Image Viewer");
         ui.text("Open an image directory to begin.");
     }
 }

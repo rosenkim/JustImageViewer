@@ -12,8 +12,9 @@ use crate::constants::{DEFAULT_BACKGROUND_COLOR1, DEFAULT_BACKGROUND_COLOR2, LOG
 use crate::constants::{DEFAULT_FOCUSED_FPS, DEFAULT_UNFOCUSED_FPS, DEFAULT_IMAGE_CACHE_COUNT, DEFAULT_UI_FONT_SIZE_PT, DEFAULT_UI_SCALE_FACTOR, DEFAULT_LIBRARY_WIDTH};
 
 const QUALIFIER: &str = "com";
-const ORGANIZATION: &str = "kim";
-const APPLICATION: &str = "VibeImageViewer";
+const ORGANIZATION: &str = "rosenkim";
+pub const APPLICATION: &str = "JustImageViewer";
+
 const CONFIG_FILENAME: &str = "settings.toml";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

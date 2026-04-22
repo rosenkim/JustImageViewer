@@ -36,6 +36,7 @@ use crate::render::image_uploader::ImageUploader;
 use crate::ui::render_ui;
 
 use crate::constants::{LOGICAL_DPI, POINTS_PER_INCH};
+use crate::infra::config::{APPLICATION};
 
 #[derive(Debug, Default)]
 struct AppArgs {
@@ -69,23 +70,25 @@ fn apply_imgui_theme(style: &mut imgui::Style, theme: AppTheme) {
 }
 
 fn parse_args() -> anyhow::Result<AppArgs> {
+    const EXECUTE_FILE_NAME: &str = "justImageViewer";
+
     let mut args = AppArgs::default();
     for arg in std::env::args().skip(1) {
         match arg.as_str() {
             "--reset-config" => args.reset_config = true,
             "-h" | "--help" => {
-                println!("Usage: image-viewer [--reset-config] [PATH]");
+                println!("Usage: {EXECUTE_FILE_NAME} [--reset-config] [PATH]");
                 println!("  --reset-config  overwrite saved settings with default_settings.toml");
                 println!("  PATH            image file path (single-file mode) or directory path");
                 std::process::exit(0);
             }
             _ => {
                 if arg.starts_with('-') {
-                    bail!("unknown argument: {arg}\nUsage: image-viewer [--reset-config] [PATH]");
+                    bail!("unknown argument: {arg}\nUsage: {EXECUTE_FILE_NAME} [--reset-config] [PATH]");
                 }
                 if args.open_path.is_some() {
                     bail!(
-                        "only one PATH argument is supported\nUsage: image-viewer [--reset-config] [PATH]"
+                        "only one PATH argument is supported\nUsage: {EXECUTE_FILE_NAME} [--reset-config] [PATH]"
                     );
                 }
                 args.open_path = Some(PathBuf::from(arg));
@@ -171,7 +174,7 @@ async fn main() -> anyhow::Result<()> {
 
     let window = Arc::new(
         WindowBuilder::new()
-            .with_title("Vibe Image Viewer")
+            .with_title(APPLICATION) // config.rs의 APPLICATION
             .with_window_icon(icon)
             .with_inner_size(LogicalSize::new(1280.0, 800.0))
             .with_resizable(true)

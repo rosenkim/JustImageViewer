@@ -1,14 +1,14 @@
-[한국어](./README_KR.md)
+[English](README.md) | [한국어](README_KR.md)
 
-# Vibe Image Viewer
+# Just Image Viewer
 
 I started creating this because I needed an image viewer that I could use on both my Windows PC and Mac, and that I could easily extend with new features. I also wanted to test the capabilities of Codex.
 
 An image viewer built using Rust, winit, wgpu, and imgui-rs.
 It supports cross-platform.
-It has a limitation dependent on the GPU's maximum texture size, but it is not a major inconvenience.
+It has a limitation dependent on the GPU's maximum texture size.
 
-[ScreenShot]
+![screenshot](screenshot.jpg)
 
 Tested and in use on Windows 11 and Apple Silicon Mac.
 
@@ -73,8 +73,12 @@ You can also drag and drop a file or folder directly onto the window.
 
 Settings are stored under the user's home directory.
 
-- macOS / Linux: `~/.VibeImageViewer/settings.toml`
-- Windows: `%USERPROFILE%/.VibeImageViewer/settings.toml`
+- macOS / Linux: `~/.justImageViewer/settings.toml`
+- Windows: `%USERPROFILE%/.justImageViewer/settings.toml`
+
+## Custom Font File Location
+
+Custom font files must be located at the settings file location or in a fonts directory under that location.
 
 ## Notes
 

@@ -1233,6 +1233,31 @@ dependencies = [
 ]
 
 [[package]]
+name = "justImageViewer"
+version = "0.2.0"
+dependencies = [
+ "anyhow",
+ "arboard",
+ "chrono",
+ "directories",
+ "env_logger",
+ "guillotiere",
+ "image 0.24.9",
+ "imgui",
+ "imgui-wgpu",
+ "imgui-winit-support",
+ "log",
+ "pollster",
+ "rfd",
+ "serde",
+ "tokio",
+ "toml 0.8.23",
+ "wgpu",
+ "winit",
+ "winres",
+]
+
+[[package]]
 name = "khronos-egl"
 version = "6.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2480,31 +2505,6 @@ name = "version_check"
 version = "0.9.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
-
-[[package]]
-name = "vibe-image-viewer"
-version = "0.2.0"
-dependencies = [
- "anyhow",
- "arboard",
- "chrono",
- "directories",
- "env_logger",
- "guillotiere",
- "image 0.24.9",
- "imgui",
- "imgui-wgpu",
- "imgui-winit-support",
- "log",
- "pollster",
- "rfd",
- "serde",
- "tokio",
- "toml 0.8.23",
- "wgpu",
- "winit",
- "winres",
-]
 
 [[package]]
 name = "walkdir"

@@ -1,6 +1,6 @@
-name = "image-viewer"
-product-name = "Vibe-Image-Viewer"
-identifier = "com.packager.vibe-image-viewer"
+name = "justImageViewer"
+product-name = "JustImageViewer"
+identifier = "com.rosenkim.justImageViewer"
 version = "0.2.0"
 out-dir = "./dist"
 binaries-dir = "./target/release"
@@ -13,5 +13,5 @@ icons = [
 ]
 
 [[binaries]]
-path = "vibe-image-viewer"
+path = "justImageViewer"
 main = true
