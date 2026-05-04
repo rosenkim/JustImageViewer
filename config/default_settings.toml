@@ -27,6 +27,8 @@ image_cache_count = 32
 focused_fps = 60
 # Rendering FPS while window is unfocused
 unfocused_fps = 5
+# Optional local HTTP server port (0 disables server)
+# http_port = 0
 
 [background_style]
 # mode can be "checker" or "solid"

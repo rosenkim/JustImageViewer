@@ -37,6 +37,7 @@ use crate::ui::render_ui;
 
 use crate::constants::{LOGICAL_DPI, POINTS_PER_INCH};
 use crate::infra::config::{APPLICATION};
+use tokio_util::sync::CancellationToken;
 
 #[derive(Debug, Default)]
 struct AppArgs {
@@ -134,6 +135,14 @@ async fn main() -> anyhow::Result<()> {
 
     log::info!("Loaded configuration from {}", config_handle.path.display());
     let mut app_state = ViewerState::new(config_handle.path, config_handle.settings);
+
+    let http_shutdown_token = CancellationToken::new();
+    let mut http_server_handle = None;
+    if app_state.config().http_port > 0 {
+        let port = app_state.config().http_port;
+        http_server_handle = Some(infra::web_server::start(port, http_shutdown_token.clone()));
+        log::info!("HTTP server requested on 127.0.0.1:{port}");
+    }
     if let Some(open_path) = args.open_path {
         app_state
             .open_path_argument(open_path)
@@ -501,6 +510,8 @@ async fn main() -> anyhow::Result<()> {
                                 &mut imgui_textures,
                                 &mut app_resources,
                                 &mut renderer,
+                                &http_shutdown_token,
+                                &mut http_server_handle,
                             );
                             window_target.exit();
                         }
@@ -621,6 +632,8 @@ async fn main() -> anyhow::Result<()> {
                                         &mut imgui_textures,
                                         &mut app_resources,
                                         &mut renderer,
+                                        &http_shutdown_token,
+                                        &mut http_server_handle,
                                     );
                                     window_target.exit();
                                     return;
@@ -663,6 +676,8 @@ async fn main() -> anyhow::Result<()> {
                                     &mut imgui_textures,
                                     &mut app_resources,
                                     &mut renderer,
+                                    &http_shutdown_token,
+                                    &mut http_server_handle,
                                 );
                                 window_target.exit();
                                 return;
@@ -787,7 +802,13 @@ fn cleanup_on_exit(
     imgui_textures: &mut ImguiTextures,
     app_resources: &mut AppResources,
     renderer: &mut imgui_wgpu::Renderer,
+    http_shutdown_token: &CancellationToken,
+    http_server_handle: &mut Option<tokio::task::JoinHandle<()>>,
 ) {
+    http_shutdown_token.cancel();
+
+    let _ = http_server_handle.take();
+
     save_config_on_exit(app_state);
     image_manager.clear();
     image_uploader.clear(renderer, imgui_textures);

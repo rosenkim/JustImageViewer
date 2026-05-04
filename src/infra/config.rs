@@ -34,6 +34,7 @@ pub struct AppConfig {
     pub image_cache_count: usize,
     pub focused_fps: u32,
     pub unfocused_fps: u32,
+    pub http_port: u16,
 
     pub show_library: bool,
     pub show_info: bool,
@@ -74,6 +75,7 @@ impl Default for AppConfig {
             image_cache_count: DEFAULT_IMAGE_CACHE_COUNT,
             focused_fps: DEFAULT_FOCUSED_FPS,
             unfocused_fps: DEFAULT_UNFOCUSED_FPS,
+            http_port: 0,
             show_library: true,
             show_info: true,
             show_selection_window: false,
