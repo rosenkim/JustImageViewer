@@ -36,7 +36,7 @@ use crate::render::image_uploader::ImageUploader;
 use crate::ui::render_ui;
 
 use crate::constants::{LOGICAL_DPI, POINTS_PER_INCH};
-use crate::infra::config::{APPLICATION};
+use crate::infra::config::APPLICATION;
 use tokio_util::sync::CancellationToken;
 
 #[derive(Debug, Default)]
@@ -137,10 +137,24 @@ async fn main() -> anyhow::Result<()> {
     let mut app_state = ViewerState::new(config_handle.path, config_handle.settings);
 
     let http_shutdown_token = CancellationToken::new();
+    let web_shared_state = infra::web_server::new_shared_state();
+    infra::web_server::set_current_directory(
+        &web_shared_state,
+        app_state.current_directory().map(PathBuf::from),
+    );
+    infra::web_server::set_selected_file(
+        &web_shared_state,
+        app_state.current_entry().map(|entry| entry.path.clone()),
+    );
+
     let mut http_server_handle = None;
     if app_state.config().http_port > 0 {
         let port = app_state.config().http_port;
-        http_server_handle = Some(infra::web_server::start(port, http_shutdown_token.clone()));
+        http_server_handle = Some(infra::web_server::start(
+            port,
+            http_shutdown_token.clone(),
+            web_shared_state.clone(),
+        ));
         log::info!("HTTP server requested on 127.0.0.1:{port}");
     }
     if let Some(open_path) = args.open_path {
@@ -435,6 +449,15 @@ async fn main() -> anyhow::Result<()> {
                             app_state.set_current_texture(None);
                         }
                     }
+
+                    infra::web_server::set_current_directory(
+                        &web_shared_state,
+                        app_state.current_directory().map(PathBuf::from),
+                    );
+                    infra::web_server::set_selected_file(
+                        &web_shared_state,
+                        app_state.current_entry().map(|entry| entry.path.clone()),
+                    );
 
                     // Poll background decode result and upload to GPU when ready.
                     if let Some((decoded_path, uploaded)) = image_uploader.poll_decoded(
