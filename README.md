@@ -27,6 +27,7 @@ Tested and in use on Windows 11 and Apple Silicon Mac.
 - Save and restore settings
 - Imgui theme support ('Dark', 'Light', 'Classic')
 - Custom font support
+- Local HTTP API support
 
 ## Build and Run
 
@@ -79,6 +80,20 @@ Settings are stored under the user's home directory.
 ## Custom Font File Location
 
 Custom font files must be located at the settings file location or in a fonts directory under that location.
+
+## Local HTTP API
+
+The app launches a local HTTP server on the port specified in the `http_port` value of `settings.toml`, provided the value is not 0. This feature is offered as a way to integrate with other programs.
+
+The server runs at `127.0.0.1:<http_port>`.
+
+Endpoints:
+
+- **GET /**: Returns a simple text response to check the server status. Example: "Welcome to Just-Image-Viewer!"
+- **GET /select**: Returns the file currently selected in the application.
+- **GET /fs/{*path}**: Returns the file corresponding to `path` within the current directory (base directory set by the app).
+
+For detailed behavior, refer to the [src/infra/web_server.rs](src/infra/web_server.rs) file.
 
 ## Notes
 

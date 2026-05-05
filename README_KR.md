@@ -27,6 +27,7 @@ Windows 11,Apple Silicon Mac 에서 테스트 및 사용 중
 - 설정 저장 및 복원
 - imgui 테마 지원 ('Dark', 'Light', 'Classic')
 - 사용자 지정 폰트 지원
+- 로컬 HTTP API 지원
 
 ## 빌드 및 실행
 
@@ -79,6 +80,21 @@ cargo packager
 ## 커스텀 폰트 파일 위치
 
 커스텀 폰트는 설정파일 위치 또는 설정 파일 위치 아래의 fonts 디렉토리에 있어야 한다.
+
+## 로컬 HTTP API
+
+앱은 settings.toml의 http_port 값이 0이 아닌 값으로 설정되어 있을 때 해당 포트로 로컬 HTTP를 띄웁니다.
+이 기능은 다른 프로그램과 연동하기 위한 한 방법으로 제공됩니다.
+
+서버는 `127.0.0.1:<http_port>`
+
+엔드포인트:
+
+- **GET /** : 서버 상태 확인용 간단한 텍스트 응답을 반환합니다. 예: "Welcome to Just-Image-Viewer!"
+- **GET /select** : 현재 애플리케이션에서 선택된 파일을 반환합니다.
+- **GET /fs/{*path}** : 현재 디렉토리(앱에서 설정한 base directory) 안의 `path`에 해당하는 파일을 반환합니다.
+
+자세한 동작은 [src/infra/web_server.rs](src/infra/web_server.rs) 파일을 참고하세요.
 
 ## 참고
 
