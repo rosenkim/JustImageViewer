@@ -16,3 +16,6 @@ pub const DEFAULT_LIBRARY_WIDTH: f32 = 300.0;
 // Default background colors (hex RGB).
 pub const DEFAULT_BACKGROUND_COLOR1: &str = "#CCCCCC";
 pub const DEFAULT_BACKGROUND_COLOR2: &str = "#FFFFFF";
+
+// Thumbnail size (in pixels).
+pub const THUMBNAIL_IMAGE_SIZE: u32 = 128;

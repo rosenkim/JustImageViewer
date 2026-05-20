@@ -486,7 +486,7 @@ impl ViewerState {
                 let result = tokio::task::spawn_blocking({
                     let path = path.clone();
                     move || -> anyhow::Result<crate::core::image_loader::DecodedImage> {
-                        image_loader::load_thumbnail_rgba(&path, 128)
+                        image_loader::load_thumbnail_rgba(&path, crate::constants::THUMBNAIL_IMAGE_SIZE)
                     }
                 })
                 .await;
