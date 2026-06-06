@@ -27,7 +27,7 @@ pub fn render_ui(
     let display = ui.io().display_size;
     // Compute heights using the effective font size so scaled fonts keep layout tight.
     let menu_height = scaled_frame_height(ui);
-    let status_height = scaled_frame_height_with_spacing(ui) + scaled_constant(ui, 6.0);
+    let status_height = scaled_frame_height_with_spacing(ui) + scaled_constant(ui, 6.0)+ app_state.config().ui_font_size_pt;
     let content_height = (display[1] - menu_height - status_height).max(120.0);
     let window_flags = imgui::WindowFlags::NO_MOVE
         | imgui::WindowFlags::NO_RESIZE
