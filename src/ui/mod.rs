@@ -1,6 +1,8 @@
+pub mod bookmark_window;
 pub mod helper;
 pub mod keyboard_shortcuts_window;
 pub mod layout_constants;
+pub mod modal;
 pub mod ui;
 
 pub use ui::render_ui;

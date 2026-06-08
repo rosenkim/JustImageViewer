@@ -24,6 +24,8 @@ tokio-util = { version = "0.7", features = ["rt"] }
 axum = "0.8"
 arboard = "3.6"
 chrono = "0.4"
+humphrey_json = "0.2.2"
+jasondb = "0.2.7"
 
 [build-dependencies]
 winres = "0.1"

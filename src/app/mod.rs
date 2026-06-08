@@ -6,11 +6,15 @@ use std::{
 };
 
 use anyhow::{Context, bail};
+use chrono::{SecondsFormat, Utc};
 use serde::{Deserialize, Serialize};
 
 use crate::{
     core::media::{self, MediaEntry, ThumbnailInfo},
-    infra::config::AppConfig,
+    infra::{
+        bookmark::{BookmarkEntry, BookmarkStore, sort_bookmarks},
+        config::AppConfig,
+    },
     render::{
         image_uploader::UploadedTexture,
         imgui_textures::ImguiTextures,
@@ -84,10 +88,12 @@ pub enum ImageSelectionDragMode {
 pub struct ViewerState {
     config: AppConfig,
     config_path: PathBuf,
+    bookmark_store: BookmarkStore,
     status_message: String,
     show_library: bool,
     show_info: bool,
     show_keyboard_shortcuts: bool,
+    show_bookmark_window: bool,
     show_selection_window: bool,
     current_directory: Option<PathBuf>,
     media_items: Vec<MediaEntry>,
@@ -106,6 +112,9 @@ pub struct ViewerState {
     image_selection: Option<Rect2D>,
     image_selection_drag_start: Option<[f32; 2]>,
     image_selection_drag_mode: Option<ImageSelectionDragMode>,
+    bookmarks: Vec<BookmarkEntry>,
+    bookmarks_dirty: bool,
+    pending_delete_bookmark_path: Option<PathBuf>,
 
     current_texture: Option<UploadedTexture>,
 
@@ -126,6 +135,7 @@ pub struct ThumbnailResult {
 impl ViewerState {
     /// Create app state with config and default UI state.
     pub fn new(config_path: PathBuf, mut config: AppConfig) -> Self {
+        let bookmark_store = BookmarkStore::new(&config_path);
         let status_message = format!("Ready - configuration at {}", config_path.display());
         let show_library = config.show_library;
         let show_info = config.show_info;
@@ -144,13 +154,26 @@ impl ViewerState {
         config.show_thumbnail = show_thumbnail;
         config.show_grid_view = show_grid_view;
 
+        let (bookmarks, status_message) = match bookmark_store.load_all() {
+            Ok(bookmarks) => (bookmarks, status_message),
+            Err(err) => {
+                log::error!("Failed to load bookmarks: {err:#}");
+                (
+                    Vec::new(),
+                    format!("Ready - failed to load bookmarks: {err:#}"),
+                )
+            }
+        };
+
         Self {
             config,
             config_path,
+            bookmark_store,
             status_message,
             show_library,
             show_info,
             show_keyboard_shortcuts: false,
+            show_bookmark_window: false,
             show_selection_window,
             current_directory: None,
             media_items: Vec::new(),
@@ -169,6 +192,9 @@ impl ViewerState {
             image_selection: None,
             image_selection_drag_start: None,
             image_selection_drag_mode: None,
+            bookmarks,
+            bookmarks_dirty: false,
+            pending_delete_bookmark_path: None,
 
             current_texture: None,
 
@@ -217,6 +243,18 @@ impl ViewerState {
         self.config.show_selection_window = show;
     }
 
+    pub fn show_bookmark_window(&self) -> bool {
+        self.show_bookmark_window
+    }
+
+    pub fn set_show_bookmark_window(&mut self, show: bool) {
+        if self.show_bookmark_window && !show {
+            self.flush_bookmarks_if_dirty();
+            self.pending_delete_bookmark_path = None;
+        }
+        self.show_bookmark_window = show;
+    }
+
     pub fn config_path(&self) -> &Path {
         &self.config_path
     }
@@ -250,6 +288,10 @@ impl ViewerState {
 
     pub fn current_entry(&self) -> Option<&MediaEntry> {
         self.current_index.and_then(|idx| self.media_items.get(idx))
+    }
+
+    pub fn bookmarks(&self) -> &[BookmarkEntry] {
+        &self.bookmarks
     }
 
     pub fn current_image_size(&self) -> Option<(usize, usize)> {
@@ -428,6 +470,85 @@ impl ViewerState {
             "path does not exist or is not accessible: {}",
             path.display()
         );
+    }
+
+    pub fn bookmark_current_directory(&mut self) {
+        let Some(directory) = self.current_directory.clone() else {
+            self.status_message = "No directory is currently open".to_owned();
+            return;
+        };
+
+        self.add_bookmark(directory);
+    }
+
+    pub fn bookmark_current_file(&mut self) {
+        let Some(path) = self.current_entry().map(|entry| entry.path.clone()) else {
+            self.status_message = "No file is currently selected".to_owned();
+            return;
+        };
+
+        self.add_bookmark(path);
+    }
+
+    pub fn open_bookmark_path(&mut self, path: &Path) {
+        if path.is_dir() {
+            self.load_directory(path.to_path_buf(), None);
+            self.status_message = format!("Opened bookmarked directory: {}", path.display());
+            return;
+        }
+
+        if path.is_file() {
+            if let Some(parent) = path.parent() {
+                self.set_show_library(true);
+                self.load_directory(parent.to_path_buf(), Some(path.to_path_buf()));
+                self.status_message = format!("Opened bookmarked file: {}", path.display());
+            } else {
+                self.status_message = format!(
+                    "Bookmarked file has no parent directory: {}",
+                    path.display()
+                );
+            }
+            return;
+        }
+
+        self.status_message = format!("Bookmarked path was not found: {}", path.display());
+    }
+
+    pub fn request_delete_bookmark(&mut self, path: PathBuf) {
+        self.pending_delete_bookmark_path = Some(path);
+    }
+
+    pub fn confirm_delete_bookmark(&mut self) {
+        let Some(path) = self.pending_delete_bookmark_path.take() else {
+            return;
+        };
+
+        let old_len = self.bookmarks.len();
+        self.bookmarks.retain(|entry| entry.path != path);
+        if self.bookmarks.len() != old_len {
+            self.bookmarks_dirty = true;
+            self.status_message = format!("Bookmark deleted: {}", path.display());
+        }
+    }
+
+    pub fn cancel_delete_bookmark(&mut self) {
+        self.pending_delete_bookmark_path = None;
+    }
+
+    pub fn flush_bookmarks_if_dirty(&mut self) {
+        if !self.bookmarks_dirty {
+            return;
+        }
+
+        match self.bookmark_store.replace_all(&self.bookmarks) {
+            Ok(()) => {
+                self.bookmarks_dirty = false;
+            }
+            Err(err) => {
+                self.status_message = format!("Failed to save bookmarks: {err:#}");
+                log::error!("Failed to save bookmarks: {err:#}");
+            }
+        }
     }
 
     pub fn refresh_current_directory(&mut self) {
@@ -752,6 +873,28 @@ impl ViewerState {
     pub fn copy_region_to_clipboard(&self, selection: Option<Rect2D>) {
         let selection = selection.or_else(|| self.image_selection());
         crate::core::helper::copy_region_to_clipboard(selection, self.current_texture.as_ref());
+    }
+
+    fn add_bookmark(&mut self, path: PathBuf) {
+        let had_pending_delete = self.bookmarks_dirty;
+        let bookmarked_at = Utc::now().to_rfc3339_opts(SecondsFormat::Secs, true);
+        let entry = BookmarkEntry::new(path.clone(), bookmarked_at);
+
+        self.bookmarks.retain(|saved| saved.path != path);
+        self.bookmarks.push(entry.clone());
+        sort_bookmarks(&mut self.bookmarks);
+
+        match self.bookmark_store.save_entry(&entry) {
+            Ok(()) => {
+                self.bookmarks_dirty = had_pending_delete;
+                self.status_message = format!("Bookmark saved: {}", path.display());
+            }
+            Err(err) => {
+                self.bookmarks_dirty = true;
+                self.status_message = format!("Failed to save bookmark: {err:#}");
+                log::error!("Failed to save bookmark {}: {err:#}", path.display());
+            }
+        }
     }
 }
 

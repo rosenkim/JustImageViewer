@@ -526,7 +526,7 @@ async fn main() -> anyhow::Result<()> {
                             log::info!("CloseRequested");
                             // exit
                             cleanup_on_exit(
-                                &app_state,
+                                &mut app_state,
                                 &mut image_manager,
                                 &mut image_uploader,
                                 &mut texture_atlas,
@@ -552,6 +552,7 @@ async fn main() -> anyhow::Result<()> {
                                 && !event.repeat
                                 && is_window_focused
                                 && !app_state.show_keyboard_shortcuts()
+                                && !app_state.show_bookmark_window()
                                 && !app_state.show_selection_window() =>
                         {
                             match event.physical_key {
@@ -648,7 +649,7 @@ async fn main() -> anyhow::Result<()> {
                                 Err(SurfaceError::OutOfMemory) => {
                                     log::error!("Surface out of memory; exiting");
                                     cleanup_on_exit(
-                                        &app_state,
+                                        &mut app_state,
                                         &mut image_manager,
                                         &mut image_uploader,
                                         &mut texture_atlas,
@@ -692,7 +693,7 @@ async fn main() -> anyhow::Result<()> {
                             if !running {
                                 // exit
                                 cleanup_on_exit(
-                                    &app_state,
+                                    &mut app_state,
                                     &mut image_manager,
                                     &mut image_uploader,
                                     &mut texture_atlas,
@@ -818,7 +819,7 @@ fn save_config_on_exit(app_state: &ViewerState) {
 }
 
 fn cleanup_on_exit(
-    app_state: &ViewerState,
+    app_state: &mut ViewerState,
     image_manager: &mut ImageManager,
     image_uploader: &mut ImageUploader,
     texture_atlas: &mut TextureAtlasManager,
@@ -832,6 +833,7 @@ fn cleanup_on_exit(
 
     let _ = http_server_handle.take();
 
+    app_state.flush_bookmarks_if_dirty();
     save_config_on_exit(app_state);
     image_manager.clear();
     image_uploader.clear(renderer, imgui_textures);

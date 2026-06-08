@@ -5,6 +5,7 @@ use crate::math::{Point2D, Rect2D};
 use crate::render::app_resources::AppResources;
 use imgui::{Condition, ImColor32, MouseButton, MouseCursor, StyleVar, TableFlags, Ui};
 
+use super::bookmark_window::render_bookmark_window;
 use super::helper::render_image_selection_widget;
 use super::keyboard_shortcuts_window::render_keyboard_shortcuts_window;
 use super::layout_constants::{
@@ -179,6 +180,18 @@ pub fn render_ui(
                         if ui.button("Refresh") {
                             app_state.refresh_current_directory();
                         }
+                        ui.new_line();
+                        if ui.button("+D") {
+                            app_state.bookmark_current_directory();
+                        }
+                        ui.same_line();
+                        if ui.button("+F") {
+                            app_state.bookmark_current_file();
+                        }
+                        ui.same_line();
+                        if ui.button("Bookmark") {
+                            app_state.set_show_bookmark_window(true);
+                        }
                     });
 
                 ui.same_line();
@@ -257,6 +270,7 @@ pub fn render_ui(
         render_keyboard_shortcuts_window(ui, &mut open);
         app_state.set_show_keyboard_shortcuts(open);
     }
+    render_bookmark_window(ui, app_state);
     render_selection_window(ui, app_state);
 
     if let Some(index) = clicked_index {
