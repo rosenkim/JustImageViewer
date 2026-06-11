@@ -14,7 +14,6 @@ use imgui::{Context as ImguiContext, FontConfig, FontGlyphRanges, FontSource};
 use imgui_wgpu::RendererConfig;
 use imgui_winit_support::{HiDpiMode, WinitPlatform};
 use std::path::PathBuf;
-use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::task::block_in_place;
 use wgpu::{Backends, Instance, InstanceDescriptor};
@@ -26,6 +25,7 @@ use winit::{
     keyboard::{KeyCode, ModifiersState, PhysicalKey},
     window::{Icon, WindowBuilder},
 };
+use std::sync::{Arc, RwLock};
 
 use crate::core::image_manager::ImageManager;
 use crate::infra::config::AppTheme;
@@ -43,6 +43,12 @@ use tokio_util::sync::CancellationToken;
 struct AppArgs {
     reset_config: bool,
     open_path: Option<PathBuf>,
+}
+
+struct WebServerState {
+    shutdown_token: CancellationToken,
+    shared_state: Arc<RwLock<infra::web_server::SharedWebState>>,
+    server_handle: tokio::task::JoinHandle<()>,
 }
 
 fn frame_interval_from_fps(fps: u32) -> Duration {
@@ -136,7 +142,6 @@ async fn main() -> anyhow::Result<()> {
     log::info!("Loaded configuration from {}", config_handle.path.display());
     let mut app_state = ViewerState::new(config_handle.path, config_handle.settings);
 
-    let http_shutdown_token = CancellationToken::new();
     let web_shared_state = infra::web_server::new_shared_state();
     infra::web_server::set_current_directory(
         &web_shared_state,
@@ -147,15 +152,15 @@ async fn main() -> anyhow::Result<()> {
         app_state.current_entry().map(|entry| entry.path.clone()),
     );
 
-    let mut http_server_handle = None;
+    let mut webserver_state: Option<WebServerState> = None;
     if app_state.config().http_port > 0 {
-        let port = app_state.config().http_port;
-        http_server_handle = Some(infra::web_server::start(
-            port,
-            http_shutdown_token.clone(),
-            web_shared_state.clone(),
-        ));
-        log::info!("HTTP server requested on 127.0.0.1:{port}");
+        webserver_state = spawn_web_server(&app_state);
+        let http_port = app_state.config().http_port;
+        if (webserver_state.is_none()) {
+            log::error!("Failed to start HTTP server on port {}", http_port);
+        } else {
+            log::info!("HTTP server requested on 127.0.0.1:{}", http_port);
+        }
     }
     if let Some(open_path) = args.open_path {
         app_state
@@ -533,8 +538,7 @@ async fn main() -> anyhow::Result<()> {
                                 &mut imgui_textures,
                                 &mut app_resources,
                                 &mut renderer,
-                                &http_shutdown_token,
-                                &mut http_server_handle,
+                                &webserver_state,
                             );
                             window_target.exit();
                         }
@@ -656,8 +660,7 @@ async fn main() -> anyhow::Result<()> {
                                         &mut imgui_textures,
                                         &mut app_resources,
                                         &mut renderer,
-                                        &http_shutdown_token,
-                                        &mut http_server_handle,
+                                        &webserver_state,
                                     );
                                     window_target.exit();
                                     return;
@@ -700,8 +703,7 @@ async fn main() -> anyhow::Result<()> {
                                     &mut imgui_textures,
                                     &mut app_resources,
                                     &mut renderer,
-                                    &http_shutdown_token,
-                                    &mut http_server_handle,
+                                    &webserver_state,
                                 );
                                 window_target.exit();
                                 return;
@@ -767,6 +769,45 @@ async fn main() -> anyhow::Result<()> {
     .map_err(anyhow::Error::msg)
 }
 
+fn spawn_web_server(
+    app_state: &ViewerState,
+) -> Option<WebServerState> {
+    let http_shutdown_token = CancellationToken::new();
+    let web_shared_state = infra::web_server::new_shared_state();
+
+    infra::web_server::set_current_directory(
+        &web_shared_state,
+        app_state.current_directory().map(PathBuf::from),
+    );
+    infra::web_server::set_selected_file(
+        &web_shared_state,
+        app_state.current_entry().map(|entry| entry.path.clone()),
+    );
+
+    if app_state.config().http_port > 0 {
+        let port = app_state.config().http_port;
+        let http_server_handle = Some(infra::web_server::start(
+            port,
+            http_shutdown_token.clone(),
+            web_shared_state.clone(),
+        ));
+        log::info!("HTTP server requested on 127.0.0.1:{port}");
+
+        if http_server_handle.is_some() == false {
+            log::error!("Failed to start HTTP server on port {port}");
+            return None;
+        }
+
+        Some(WebServerState {
+            shutdown_token: http_shutdown_token,
+            shared_state: web_shared_state,
+            server_handle: http_server_handle.unwrap(),
+        })
+    } else {
+        None
+    }
+}
+
 fn create_surface_config(
     surface: &Surface<'_>,
     adapter: &wgpu::Adapter,
@@ -826,12 +867,14 @@ fn cleanup_on_exit(
     imgui_textures: &mut ImguiTextures,
     app_resources: &mut AppResources,
     renderer: &mut imgui_wgpu::Renderer,
-    http_shutdown_token: &CancellationToken,
-    http_server_handle: &mut Option<tokio::task::JoinHandle<()>>,
+    webserver_state: &Option<WebServerState>,
 ) {
-    http_shutdown_token.cancel();
-
-    let _ = http_server_handle.take();
+    if webserver_state.is_some() {
+        log::info!("Shutting down HTTP server...");
+        let state = webserver_state.as_ref().unwrap();
+        state.shutdown_token.cancel();
+        state.server_handle.abort();
+    }
 
     app_state.flush_bookmarks_if_dirty();
     save_config_on_exit(app_state);

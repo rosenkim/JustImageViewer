@@ -180,7 +180,6 @@ pub fn render_ui(
                         if ui.button("Refresh") {
                             app_state.refresh_current_directory();
                         }
-                        ui.new_line();
                         if ui.button("+D") {
                             app_state.bookmark_current_directory();
                         }
