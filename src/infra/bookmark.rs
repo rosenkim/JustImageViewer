@@ -4,10 +4,9 @@ use std::{
 };
 
 use anyhow::{Context, Result};
-use humphrey_json::prelude::*;
-use jasondb::Database;
+use serde::{Deserialize, Serialize};
 
-const BOOKMARK_FILENAME: &str = "bookmark.json";
+const BOOKMARK_FILENAME: &str = "bookmarks.toml";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BookmarkEntry {
@@ -15,10 +14,15 @@ pub struct BookmarkEntry {
     pub bookmarked_at: String,
 }
 
-#[derive(Debug, Clone, FromJson, IntoJson)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct BookmarkRecord {
     path: String,
     bookmarked_at: String,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+struct BookmarkFile {
+    bookmark: Vec<BookmarkRecord>,
 }
 
 #[derive(Debug, Clone)]
@@ -35,52 +39,59 @@ impl BookmarkStore {
             .join(BOOKMARK_FILENAME);
         Self { path }
     }
+
     /// Read all bookmarks from disk.
     pub fn load_all(&self) -> Result<Vec<BookmarkEntry>> {
-        let mut database = Database::<BookmarkRecord>::new(&self.path)
-            .with_context(|| format!("failed to open bookmark database {}", self.path.display()))?;
-
-        let mut entries = Vec::new();
-        for item in database.iter() {
-            let (_, record) = item.with_context(|| {
-                format!("failed to read bookmark data from {}", self.path.display())
-            })?;
-            entries.push(BookmarkEntry::from_record(record));
+        if !self.path.exists() {
+            return Ok(Vec::new());
         }
+
+        let content = fs::read_to_string(&self.path)
+            .with_context(|| format!("failed to read {}", self.path.display()))?;
+        let file: BookmarkFile = toml::from_str(&content)
+            .with_context(|| format!("failed to parse {}", self.path.display()))?;
+
+        let mut entries: Vec<BookmarkEntry> = file
+            .bookmark
+            .into_iter()
+            .map(|r| BookmarkEntry {
+                path: PathBuf::from(r.path),
+                bookmarked_at: r.bookmarked_at,
+            })
+            .collect();
 
         sort_bookmarks(&mut entries);
         Ok(entries)
     }
 
-    /// Save one bookmark right away.
+    /// Save one bookmark, skipping duplicates.
     pub fn save_entry(&self, entry: &BookmarkEntry) -> Result<()> {
-        let mut database = Database::<BookmarkRecord>::new(&self.path)
-            .with_context(|| format!("failed to open bookmark database {}", self.path.display()))?;
-
-        database
-            .set(entry.key(), &entry.to_record())
-            .with_context(|| format!("failed to save bookmark {}", entry.path.display()))
+        let mut entries = self.load_all().unwrap_or_default();
+        if !entries.iter().any(|e| e.path == entry.path) {
+            entries.push(entry.clone());
+        }
+        self.write_all(&entries)
     }
 
     /// Rewrite the full bookmark file from the current in-memory state.
     pub fn replace_all(&self, entries: &[BookmarkEntry]) -> Result<()> {
-        if self.path.exists() {
-            fs::remove_file(&self.path).with_context(|| {
-                format!("failed to remove old bookmark file {}", self.path.display())
-            })?;
-        }
+        self.write_all(entries)
+    }
 
-        let mut database = Database::<BookmarkRecord>::new(&self.path).with_context(|| {
-            format!("failed to create bookmark database {}", self.path.display())
-        })?;
-
-        for entry in entries {
-            database
-                .set(entry.key(), &entry.to_record())
-                .with_context(|| format!("failed to write bookmark {}", entry.path.display()))?;
-        }
-
-        Ok(())
+    fn write_all(&self, entries: &[BookmarkEntry]) -> Result<()> {
+        let file = BookmarkFile {
+            bookmark: entries
+                .iter()
+                .map(|e| BookmarkRecord {
+                    path: e.path.to_string_lossy().into_owned(),
+                    bookmarked_at: e.bookmarked_at.clone(),
+                })
+                .collect(),
+        };
+        let content = toml::to_string_pretty(&file)
+            .context("failed to serialize bookmarks to TOML")?;
+        fs::write(&self.path, &content)
+            .with_context(|| format!("failed to write {}", self.path.display()))
     }
 }
 
@@ -94,20 +105,6 @@ impl BookmarkEntry {
 
     pub fn key(&self) -> String {
         self.path.to_string_lossy().into_owned()
-    }
-
-    fn to_record(&self) -> BookmarkRecord {
-        BookmarkRecord {
-            path: self.path.to_string_lossy().into_owned(),
-            bookmarked_at: self.bookmarked_at.clone(),
-        }
-    }
-
-    fn from_record(record: BookmarkRecord) -> Self {
-        Self {
-            path: PathBuf::from(record.path),
-            bookmarked_at: record.bookmarked_at,
-        }
     }
 }
 
