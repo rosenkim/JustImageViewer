@@ -42,7 +42,10 @@ pub fn render_image_selection_widget(
         return;
     }
 
-    let is_hovering_view_panel = ui.is_mouse_hovering_rect(view_panel_min, view_panel_max);
+    // is_window_hovered() returns false when another ImGui window is on top,
+    // so this prevents input from reaching the image when it is obscured.
+    let is_hovering_view_panel = ui.is_mouse_hovering_rect(view_panel_min, view_panel_max)
+        && ui.is_window_hovered();
     let mouse_pos: Point2D = Point2D::from_array(ui.io().mouse_pos);
 
     let active_drag_mode = app_state.image_selection_drag_mode();
