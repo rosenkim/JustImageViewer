@@ -130,8 +130,11 @@ pub fn render_ui(
                             force_scroll_to_selected = true;
                         }
                         ui.separator();
+                         // Estimate height of the 2 rows of buttons below (Open/Refresh + Bookmark buttons) add 8.0 for padding.
+                        let buttons_height =
+                            2.0 * ui.frame_height() + ui.clone_style().item_spacing[1] + 8.0;
                         ui.child_window("library_scroll")
-                            .size([0.0, -36.0])
+                            .size([0.0, -buttons_height])
                             .build(|| {
                                 let mut pending_scroll_direction =
                                     app_state.take_pending_library_scroll_to_selection();

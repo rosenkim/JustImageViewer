@@ -559,16 +559,7 @@ impl MainApp {
         );
 
         if !running {
-            cleanup_on_exit(
-                &mut self.app_state,
-                &mut self.image_manager,
-                &mut self.image_uploader,
-                &mut self.texture_atlas,
-                &mut self.imgui_textures,
-                &mut self.app_resources,
-                &mut self.renderer,
-                &self.webserver_state,
-            );
+            self.cleanup();
             window_target.exit();
             return;
         }
@@ -628,16 +619,21 @@ impl MainApp {
 
     /// Release all resources and persist state. Called once before exit.
     fn cleanup(&mut self) {
-        cleanup_on_exit(
-            &mut self.app_state,
-            &mut self.image_manager,
-            &mut self.image_uploader,
-            &mut self.texture_atlas,
-            &mut self.imgui_textures,
-            &mut self.app_resources,
-            &mut self.renderer,
-            &self.webserver_state,
-        );
+        if let Some(state) = &self.webserver_state {
+            log::info!("Shutting down HTTP server...");
+            state.shutdown_token.cancel();
+            state.server_handle.abort();
+        }
+
+        self.app_state.flush_bookmarks_if_dirty();
+        save_config_on_exit(&mut self.app_state);
+        self.image_manager.clear();
+        self.image_uploader
+            .clear(&mut self.renderer, &mut self.imgui_textures);
+        self.texture_atlas
+            .clear(&mut self.renderer, &mut self.imgui_textures);
+        self.app_resources.release(&mut self.renderer);
+        self.imgui_textures.clear(&mut self.renderer);
     }
 }
 
@@ -885,30 +881,6 @@ fn save_config_on_exit(app_state: &ViewerState) {
     }
 }
 
-fn cleanup_on_exit(
-    app_state: &mut ViewerState,
-    image_manager: &mut ImageManager,
-    image_uploader: &mut ImageUploader,
-    texture_atlas: &mut TextureAtlasManager,
-    imgui_textures: &mut ImguiTextures,
-    app_resources: &mut AppResources,
-    renderer: &mut imgui_wgpu::Renderer,
-    webserver_state: &Option<WebServerState>,
-) {
-    if let Some(state) = webserver_state {
-        log::info!("Shutting down HTTP server...");
-        state.shutdown_token.cancel();
-        state.server_handle.abort();
-    }
-
-    app_state.flush_bookmarks_if_dirty();
-    save_config_on_exit(app_state);
-    image_manager.clear();
-    image_uploader.clear(renderer, imgui_textures);
-    texture_atlas.clear(renderer, imgui_textures);
-    app_resources.release(renderer);
-    imgui_textures.clear(renderer);
-}
 
 /// Try to restore the last open file from config.
 fn restore_last_directory_if_needed(app_state: &mut ViewerState) {
