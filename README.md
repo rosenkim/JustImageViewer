@@ -14,7 +14,7 @@ Tested and in use on Windows 11 and Apple Silicon Mac.
 
 ## Development Tools
 
-- Codex and Windsurf
+- Mainly claude code and codex
 
 ## Features
 

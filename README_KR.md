@@ -14,7 +14,7 @@ Windows 11,Apple Silicon Mac 에서 테스트 및 사용 중
 
 ## 개발 도구
 
-- Codex and Windsurf
+- Mainly claude code and codex
 
 ## 기능
 
