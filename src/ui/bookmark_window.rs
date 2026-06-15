@@ -16,6 +16,7 @@ pub fn render_bookmark_window(ui: &Ui, app_state: &mut ViewerState) {
 
     let mut open = true;
     let mut open_target = None;
+    let mut open_delete_modal = false;
     let bookmarks = app_state.bookmarks().to_vec();
 
     ui.window("Bookmarks")
@@ -83,26 +84,32 @@ pub fn render_bookmark_window(ui: &Ui, app_state: &mut ViewerState) {
                             ui.table_next_column();
                             if ui.small_button(format!("Del##{key}")) {
                                 app_state.request_delete_bookmark(bookmark.path.clone());
-                                ui.open_popup(DELETE_BOOKMARK_MODAL_ID);
+                                // Defer open_popup to outside the child window so the modal
+                                // ID resolves in the same scope as begin_popup_modal below.
+                                open_delete_modal = true;
                             }
                         }
                     }
                 });
-        });
 
-    if let Some(decision) = render_yes_no_modal(
-        ui,
-        DELETE_BOOKMARK_MODAL_ID,
-        "Delete this bookmark?",
-        "Yes",
-        "No",
-    ) {
-        if decision {
-            app_state.confirm_delete_bookmark();
-        } else {
-            app_state.cancel_delete_bookmark();
-        }
-    }
+            // open_popup and begin_popup_modal must share the same window ID context.
+            if open_delete_modal {
+                ui.open_popup(DELETE_BOOKMARK_MODAL_ID);
+            }
+            if let Some(decision) = render_yes_no_modal(
+                ui,
+                DELETE_BOOKMARK_MODAL_ID,
+                "Delete this bookmark?",
+                "Yes",
+                "No",
+            ) {
+                if decision {
+                    app_state.confirm_delete_bookmark();
+                } else {
+                    app_state.cancel_delete_bookmark();
+                }
+            }
+        });
 
     if let Some(path) = open_target {
         app_state.open_bookmark_path(&path);
