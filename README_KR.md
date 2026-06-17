@@ -2,7 +2,7 @@
 
 # Just Image Viewer
 
-내가 사용하는 Windows PC와 Mac에서 같이 사용할 수 있고 내가 쉽게 기능을 확장할 수 있는 이미지 뷰어가 필요해서 만들기 시작. 거기에 Codex의 능력도 확인해보고 싶었다.
+내가 사용하는 Windows PC와 Mac에서 같이 사용할 수 있고 내가 쉽게 기능을 확장할 수 있는 이미지 뷰어가 필요해서 만들기 시작.
 
 Rust,winit,wgpu,imgui-rs를 사용하여 만든 이미지 뷰어
 cross platform 을 지원

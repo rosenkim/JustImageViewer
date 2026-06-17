@@ -2,7 +2,7 @@
 
 # Just Image Viewer
 
-I started creating this because I needed an image viewer that I could use on both my Windows PC and Mac, and that I could easily extend with new features. I also wanted to test the capabilities of Codex.
+I started creating this because I needed an image viewer that I could use on both my Windows PC and Mac, and that I could easily extend with new features.
 
 An image viewer built using Rust, winit, wgpu, and imgui-rs.
 It supports cross-platform.
