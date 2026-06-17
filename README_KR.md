@@ -28,6 +28,7 @@ Windows 11,Apple Silicon Mac 에서 테스트 및 사용 중
 - imgui 테마 지원 ('Dark', 'Light', 'Classic')
 - 사용자 지정 폰트 지원
 - 로컬 HTTP API 지원
+- 자주 찾는 디렉토리를 북마크로 저장하여 빠르게 이동
 
 ## 빌드 및 실행
 

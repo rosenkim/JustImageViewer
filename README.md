@@ -28,6 +28,7 @@ Tested and in use on Windows 11 and Apple Silicon Mac.
 - Imgui theme support ('Dark', 'Light', 'Classic')
 - Custom font support
 - Local HTTP API support
+- Bookmark directories for quick access
 
 ## Build and Run
 
