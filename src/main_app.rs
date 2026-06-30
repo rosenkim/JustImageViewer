@@ -480,42 +480,66 @@ impl MainApp {
             }
             // ArrowRight: move by one item.
             PhysicalKey::Code(KeyCode::ArrowRight) => {
-                self.app_state.advance_selection(1);
+                self.navigate(1);
             }
             // ArrowDown: move by one visual row in the library.
             PhysicalKey::Code(KeyCode::ArrowDown) => {
                 let step = self.app_state.library_items_per_row() as i32;
-                self.app_state.advance_selection(step);
+                self.navigate(step);
             }
             // PageDown: go to next 10 images.
             PhysicalKey::Code(KeyCode::PageDown) => {
-                self.app_state.advance_selection(10);
+                self.navigate(10);
             }
             // ArrowLeft: move by one item.
             PhysicalKey::Code(KeyCode::ArrowLeft) => {
-                self.app_state.advance_selection(-1);
+                self.navigate(-1);
             }
             // ArrowUp: move by one visual row in the library.
             PhysicalKey::Code(KeyCode::ArrowUp) => {
                 let step = self.app_state.library_items_per_row() as i32;
-                self.app_state.advance_selection(-step);
+                self.navigate(-step);
             }
             // PageUp: go to previous 10 images.
             PhysicalKey::Code(KeyCode::PageUp) => {
-                self.app_state.advance_selection(-10);
+                self.navigate(-10);
             }
             // Home: go to first image.
             PhysicalKey::Code(KeyCode::Home) => {
-                self.app_state.select_index(0);
+                self.navigate_to(0);
             }
             // End: go to last image.
             PhysicalKey::Code(KeyCode::End) => {
                 let total = self.app_state.media_items().len();
                 if total > 0 {
-                    self.app_state.select_index(total - 1);
+                    self.navigate_to(total - 1);
                 }
             }
+            // Space: collapse a multi-selection down to the focused file.
+            PhysicalKey::Code(KeyCode::Space) => {
+                self.app_state.collapse_selection_to_cursor();
+            }
             _ => {}
+        }
+    }
+
+    /// Move by `delta`. When several files are selected the keyboard only moves
+    /// the cursor; otherwise it changes the single selection.
+    fn navigate(&mut self, delta: i32) {
+        if self.app_state.is_multi_select() {
+            self.app_state.move_cursor(delta);
+        } else {
+            self.app_state.advance_selection(delta);
+        }
+    }
+
+    /// Jump to an absolute index, following the same multi-select rule as
+    /// [`Self::navigate`].
+    fn navigate_to(&mut self, index: usize) {
+        if self.app_state.is_multi_select() {
+            self.app_state.move_cursor_to(index);
+        } else {
+            self.app_state.select_index(index);
         }
     }
 

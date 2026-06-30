@@ -1,4 +1,5 @@
 use std::{
+    collections::HashSet,
     ffi::OsStr,
     path::{Path, PathBuf},
     sync::Arc,
@@ -98,6 +99,11 @@ pub struct ViewerState {
     current_directory: Option<PathBuf>,
     media_items: Vec<MediaEntry>,
     current_index: Option<usize>,
+    // Paths of every file in the multi-selection. One path means single-select,
+    // more than one means multi-select. `current_index` is the keyboard cursor.
+    selected_paths: HashSet<PathBuf>,
+    // Anchor index used to build a range when the user Shift+clicks.
+    selection_anchor: Option<usize>,
     current_image_size: Option<(usize, usize)>,
     needs_image_reload: bool,
     library_width: f32,
@@ -178,6 +184,8 @@ impl ViewerState {
             current_directory: None,
             media_items: Vec::new(),
             current_index: None,
+            selected_paths: HashSet::new(),
+            selection_anchor: None,
             current_image_size: None,
             needs_image_reload: false,
             library_width,
@@ -402,10 +410,13 @@ impl ViewerState {
         self.library_items_per_row = items_per_row.max(1);
     }
 
+    /// Select exactly one item (single-select). Moves the cursor, resets the
+    /// selection set to this item, and asks the viewer to decode its image.
     pub fn select_index(&mut self, index: usize) {
         if index < self.media_items.len() {
             let delta = index as i32 - self.current_index.unwrap_or(0) as i32;
             self.current_index = Some(index);
+            self.set_single_selection(Some(index));
             self.needs_image_reload = true;
             self.pending_library_scroll_to_selection = true;
             self.pending_library_scroll_direction = delta.signum();
@@ -426,6 +437,117 @@ impl ViewerState {
         let next = ((current as i32 + delta).rem_euclid(total as i32)) as usize;
         if next != current {
             self.select_index(next);
+        }
+    }
+
+    /// Reset the selection set so it holds only the file at `index` (or nothing
+    /// when `index` is `None`). Also records that index as the range anchor.
+    fn set_single_selection(&mut self, index: Option<usize>) {
+        self.selected_paths.clear();
+        self.selection_anchor = index;
+        if let Some(path) = index.and_then(|i| self.media_items.get(i)).map(|e| e.path.clone()) {
+            self.selected_paths.insert(path);
+        }
+    }
+
+    /// Toggle a single file in or out of the selection (Shift+click). Clicking an
+    /// unselected file adds it; clicking a selected file removes it.
+    pub fn toggle_selection_at(&mut self, index: usize) {
+        let Some(path) = self.media_items.get(index).map(|entry| entry.path.clone()) else {
+            return;
+        };
+
+        if self.selected_paths.contains(&path) {
+            self.selected_paths.remove(&path);
+        } else {
+            self.selected_paths.insert(path);
+        }
+        self.selection_anchor = Some(index);
+        self.current_index = Some(index);
+        self.pending_library_scroll_to_selection = true;
+        self.pending_library_scroll_direction = 0;
+        self.clear_image_selection_state();
+
+        match self.selected_paths.len() {
+            // Nothing selected: clear the cursor and the viewer.
+            0 => {
+                self.current_index = None;
+                self.current_image_size = None;
+                self.needs_image_reload = true;
+            }
+            // Collapsed to one file: show it as a single image and move the
+            // cursor onto it (it may differ from the file just clicked).
+            1 => {
+                if let Some(only) = self.selected_paths.iter().next().cloned()
+                    && let Some(i) = self.media_items.iter().position(|e| e.path == only)
+                {
+                    self.current_index = Some(i);
+                }
+                self.needs_image_reload = true;
+            }
+            // Still multiple: the viewer keeps showing the thumbnail grid.
+            _ => {}
+        }
+        self.sync_last_open_file();
+    }
+
+    /// True when more than one file is selected (multi-select mode).
+    pub fn is_multi_select(&self) -> bool {
+        self.selected_paths.len() > 1
+    }
+
+    /// Number of files currently selected.
+    pub fn selected_count(&self) -> usize {
+        self.selected_paths.len()
+    }
+
+    /// True when `path` is part of the current selection.
+    pub fn is_path_selected(&self, path: &Path) -> bool {
+        self.selected_paths.contains(path)
+    }
+
+    /// Selected entries, yielded in library (display) order.
+    pub fn selected_entries(&self) -> impl Iterator<Item = &MediaEntry> {
+        self.media_items
+            .iter()
+            .filter(|entry| self.selected_paths.contains(&entry.path))
+    }
+
+    /// Move only the keyboard cursor by `delta` without touching the selection.
+    /// Used while multiple files are selected.
+    pub fn move_cursor(&mut self, delta: i32) {
+        let Some(current) = self.current_index else {
+            return;
+        };
+        let total = self.media_items.len();
+        if total == 0 {
+            return;
+        }
+        let next = ((current as i32 + delta).rem_euclid(total as i32)) as usize;
+        if next != current {
+            self.current_index = Some(next);
+            self.pending_library_scroll_to_selection = true;
+            self.pending_library_scroll_direction = (next as i32 - current as i32).signum();
+        }
+    }
+
+    /// Move only the keyboard cursor to an absolute index (e.g. Home/End) while
+    /// multiple files are selected.
+    pub fn move_cursor_to(&mut self, index: usize) {
+        if index >= self.media_items.len() {
+            return;
+        }
+        let delta = index as i32 - self.current_index.unwrap_or(0) as i32;
+        self.current_index = Some(index);
+        self.pending_library_scroll_to_selection = true;
+        self.pending_library_scroll_direction = delta.signum();
+    }
+
+    /// Collapse a multi-selection down to the single file under the cursor
+    /// (triggered by Spacebar).
+    pub fn collapse_selection_to_cursor(&mut self) {
+        if let Some(index) = self.current_index {
+            self.select_index(index);
         }
     }
 
@@ -750,6 +872,7 @@ impl ViewerState {
                     self.current_directory = Some(directory);
                     self.media_items.clear();
                     self.current_index = None;
+                    self.set_single_selection(None);
                     self.current_image_size = None;
                     self.needs_image_reload = false;
                     self.clear_image_selection_state();
@@ -768,6 +891,7 @@ impl ViewerState {
                     })
                     .or(Some(0));
                 self.current_index = focus_index;
+                self.set_single_selection(focus_index);
                 self.config.last_open_file = self
                     .current_index
                     .and_then(|i| self.media_items.get(i))
@@ -832,6 +956,7 @@ impl ViewerState {
             thumbnail: None,
         }];
         self.current_index = Some(0);
+        self.set_single_selection(Some(0));
         self.current_image_size = None;
         self.needs_image_reload = true;
         self.status_message = format!("Loaded 1 image: {}", file_path.display());
@@ -886,6 +1011,9 @@ impl ViewerState {
                 .iter()
                 .position(|entry| &entry.path == target)
         });
+        // Selection is tracked by path, so it survives the re-sort untouched.
+        // Keep the range anchor aligned with the cursor's new position.
+        self.selection_anchor = self.current_index;
         self.sync_last_open_file();
     }
 

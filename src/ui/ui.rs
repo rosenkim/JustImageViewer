@@ -3,7 +3,7 @@ use crate::core::media::MediaEntry;
 use crate::infra::config::BackgroundMode;
 use crate::math::{Point2D, Rect2D};
 use crate::render::app_resources::AppResources;
-use imgui::{Condition, ImColor32, MouseButton, MouseCursor, StyleVar, TableFlags, Ui};
+use imgui::{Condition, ImColor32, MouseButton, MouseCursor, StyleColor, StyleVar, TableFlags, Ui};
 
 use super::bookmark_window::render_bookmark_window;
 use super::helper::render_image_selection_widget;
@@ -15,6 +15,15 @@ use super::layout_constants::{
 
 const LIBRARY_SORT_FIELDS: [&str; 3] = ["Name", "Date", "Size"];
 const LIBRARY_SORT_DIRECTIONS: [&str; 2] = ["Ascending", "Descending"];
+
+// Square cell size for each thumbnail when several selected images are shown
+// side by side in the viewer panel.
+const MULTI_VIEW_CELL_SIZE: f32 = 160.0;
+
+// Library row colors: a very light tint while hovering and a slightly stronger
+// tint for selected rows, so multi-selection reads clearly.
+const LIBRARY_HOVER_COLOR: [f32; 4] = [1.0, 1.0, 1.0, 0.12];
+const LIBRARY_SELECTED_COLOR: [f32; 4] = [1.0, 1.0, 1.0, 0.28];
 
 pub fn render_ui(
     ui: &imgui::Ui,
@@ -144,6 +153,15 @@ pub fn render_ui(
                                 let items_per_row = calculate_library_items_per_row(ui, app_state);
                                 app_state.set_library_items_per_row(items_per_row);
 
+                                // Custom selection/hover tints applied to every
+                                // selectable in the library list and grid.
+                                let _hover_token =
+                                    ui.push_style_color(StyleColor::HeaderHovered, LIBRARY_HOVER_COLOR);
+                                let _selected_token =
+                                    ui.push_style_color(StyleColor::Header, LIBRARY_SELECTED_COLOR);
+                                let _active_token =
+                                    ui.push_style_color(StyleColor::HeaderActive, LIBRARY_SELECTED_COLOR);
+
                                 if app_state.show_grid_view() {
                                     if let Some(index) = render_library_grid(
                                         ui,
@@ -234,7 +252,7 @@ pub fn render_ui(
                         .size([image_width.max(100.0), 0.0])
                         .flags(imgui::WindowFlags::HORIZONTAL_SCROLLBAR)
                         .build(|| {
-                            render_image_content(ui, app_state, is_pending);
+                            render_image_content(ui, app_state, app_resources, is_pending);
                         });
 
                     if show_info {
@@ -249,7 +267,11 @@ pub fn render_ui(
                         ui.same_line();
 
                         ui.child_window("info_region").size([0.0, 0.0]).build(|| {
-                            render_file_info(ui, app_state.current_entry());
+                            if app_state.is_multi_select() {
+                                render_multi_selection_info(ui, app_state);
+                            } else {
+                                render_file_info(ui, app_state.current_entry());
+                            }
                         });
                     }
                 });
@@ -276,7 +298,12 @@ pub fn render_ui(
     render_selection_window(ui, app_state);
 
     if let Some(index) = clicked_index {
-        app_state.select_index(index);
+        // Plain click selects one; Shift+click toggles that single file.
+        if ui.io().key_shift {
+            app_state.toggle_selection_at(index);
+        } else {
+            app_state.select_index(index);
+        }
     }
 }
 
@@ -583,17 +610,36 @@ fn render_library_item_row(
         let selectable_label = format!("{}##library_item_{index}", file_info);
         let text_clicked = ui
             .selectable_config(&selectable_label)
-            .selected(app_state.current_index() == Some(index))
+            .selected(app_state.is_path_selected(&entry.path))
             .size([
                 (current_width - thumbnail_size_xy[0]) as f32,
                 thumbnail_size_xy[1],
             ])
             .build();
+        draw_cursor_outline_if_needed(ui, app_state, index);
         return thumbnail_clicked || text_clicked;
     } else {
-        ui.selectable_config(&entry.file_name)
-            .selected(app_state.current_index() == Some(index))
-            .build()
+        let clicked = ui
+            .selectable_config(&entry.file_name)
+            .selected(app_state.is_path_selected(&entry.path))
+            .build();
+        draw_cursor_outline_if_needed(ui, app_state, index);
+        clicked
+    }
+}
+
+/// While multiple files are selected, outline the row under the keyboard cursor
+/// so the user can see where Spacebar will collapse the selection.
+fn draw_cursor_outline_if_needed(ui: &Ui, app_state: &ViewerState, index: usize) {
+    if app_state.is_multi_select() && app_state.current_index() == Some(index) {
+        ui.get_window_draw_list()
+            .add_rect(
+                ui.item_rect_min(),
+                ui.item_rect_max(),
+                ImColor32::from_rgba(255, 255, 255, 180),
+            )
+            .thickness(1.5)
+            .build();
     }
 }
 
@@ -658,7 +704,7 @@ fn render_library_grid(
         }
         ui.table_set_column_index(col);
 
-        let is_selected = app_state.current_index() == Some(index);
+        let is_selected = app_state.is_path_selected(&entry.path);
         let selectable_id = format!("##grid_item_{index}");
 
         // Record top-left of this cell before drawing
@@ -674,6 +720,7 @@ fn render_library_grid(
         {
             clicked = Some(index);
         }
+        draw_cursor_outline_if_needed(ui, app_state, index);
         handle_scroll_to_selected(ui, current_index, index, pending_scroll_direction);
         if ui.is_item_hovered() {
             let text = file_info_text(Some(entry));
@@ -839,7 +886,20 @@ fn clamp_selection_axis(mut min: f32, mut max: f32, bound: f32) -> (f32, f32) {
     (min, max)
 }
 
-fn render_image_content(ui: &imgui::Ui, app_state: &mut ViewerState, is_pending: bool) {
+fn render_image_content(
+    ui: &imgui::Ui,
+    app_state: &mut ViewerState,
+    app_resources: &AppResources,
+    is_pending: bool,
+) {
+    // With several files selected, show their thumbnails in a grid instead of a
+    // single decoded image. Thumbnails are already in memory, so nothing extra
+    // is loaded here.
+    if app_state.is_multi_select() {
+        render_selected_images_grid(ui, app_state, app_resources);
+        return;
+    }
+
     if let Some(ref texture) = app_state.current_texture() {
         let avail = ui.content_region_avail();
         let fb_scale = ui.io().display_framebuffer_scale[0];
@@ -893,5 +953,50 @@ fn render_image_content(ui: &imgui::Ui, app_state: &mut ViewerState, is_pending:
     } else {
         ui.text("Welcome to Just Image Viewer");
         ui.text("Open an image directory to begin.");
+    }
+}
+
+/// Draw every selected image as a thumbnail grid in the viewer panel. Uses the
+/// already-decoded thumbnails, so no extra image is loaded.
+fn render_selected_images_grid(ui: &Ui, app_state: &ViewerState, app_resources: &AppResources) {
+    let cell = MULTI_VIEW_CELL_SIZE;
+    let spacing = ui.clone_style().item_spacing[0].max(4.0);
+    let available = ui.content_region_avail()[0].max(cell);
+    let columns = (((available + spacing) / (cell + spacing)).floor() as usize).max(1);
+
+    let mut column = 0usize;
+    for entry in app_state.selected_entries() {
+        if column != 0 {
+            ui.same_line();
+        }
+
+        let (texture_id, uvs, img_w, img_h) = resolve_thumbnail(entry, app_resources);
+        let (draw_w, draw_h) = fit_scale_in_cell(img_w, img_h, cell);
+        // Reserve a uniform square cell and center the thumbnail inside it so the
+        // rows stay aligned regardless of each image's aspect ratio.
+        let origin = ui.cursor_screen_pos();
+        let img_x = origin[0] + (cell - draw_w) * 0.5;
+        let img_y = origin[1] + (cell - draw_h) * 0.5;
+        ui.get_window_draw_list()
+            .add_image(texture_id, [img_x, img_y], [img_x + draw_w, img_y + draw_h])
+            .uv_min([uvs[0], uvs[1]])
+            .uv_max([uvs[2], uvs[3]])
+            .build();
+        ui.dummy([cell, cell]);
+
+        column += 1;
+        if column >= columns {
+            column = 0;
+        }
+    }
+}
+
+/// Show a summary of the multi-selection in the info panel: the count followed
+/// by each selected file name.
+fn render_multi_selection_info(ui: &Ui, app_state: &ViewerState) {
+    ui.text(format!("{} files selected", app_state.selected_count()));
+    ui.separator();
+    for entry in app_state.selected_entries() {
+        ui.text_wrapped(&entry.file_name);
     }
 }
