@@ -454,6 +454,32 @@ impl ViewerState {
         }
     }
 
+    /// Reveal the directory that is currently open in the system file manager
+    /// (Finder on macOS, Explorer on Windows, the default handler on Linux).
+    pub fn open_current_directory_in_file_manager(&mut self) {
+        let Some(directory) = self.current_directory.clone() else {
+            self.status_message = "No directory is currently open".to_owned();
+            return;
+        };
+
+        // Pick the right command for each operating system.
+        #[cfg(target_os = "macos")]
+        let result = std::process::Command::new("open").arg(&directory).spawn();
+        #[cfg(target_os = "windows")]
+        let result = std::process::Command::new("explorer").arg(&directory).spawn();
+        #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+        let result = std::process::Command::new("xdg-open").arg(&directory).spawn();
+
+        match result {
+            Ok(_) => {
+                self.status_message = format!("Opened {}", directory.display());
+            }
+            Err(error) => {
+                self.status_message = format!("Failed to open directory: {error}");
+            }
+        }
+    }
+
     pub fn open_path_argument(&mut self, path: PathBuf) -> anyhow::Result<()> {
         if path.is_dir() {
             self.load_directory(path, None);

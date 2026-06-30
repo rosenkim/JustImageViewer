@@ -176,8 +176,8 @@ pub fn render_ui(
                                     }
                                 }
                             });
-                        if ui.button("Open Directory...") {
-                            app_state.open_directory_dialog();
+                        if ui.button("Open Current Directory") {
+                            app_state.open_current_directory_in_file_manager();
                         }
                         ui.same_line();
                         if ui.button("Refresh") {
