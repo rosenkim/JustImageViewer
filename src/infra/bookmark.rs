@@ -6,7 +6,7 @@ use std::{
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
-const BOOKMARK_FILENAME: &str = "bookmarks.toml";
+const BOOKMARK_FILENAME: &str = "bookmarks.json";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BookmarkEntry {
@@ -22,7 +22,7 @@ struct BookmarkRecord {
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 struct BookmarkFile {
-    bookmark: Vec<BookmarkRecord>,
+    bookmarks: Vec<BookmarkRecord>,
 }
 
 #[derive(Debug, Clone)]
@@ -48,11 +48,11 @@ impl BookmarkStore {
 
         let content = fs::read_to_string(&self.path)
             .with_context(|| format!("failed to read {}", self.path.display()))?;
-        let file: BookmarkFile = toml::from_str(&content)
+        let file: BookmarkFile = serde_json::from_str(&content)
             .with_context(|| format!("failed to parse {}", self.path.display()))?;
 
         let mut entries: Vec<BookmarkEntry> = file
-            .bookmark
+            .bookmarks
             .into_iter()
             .map(|r| BookmarkEntry {
                 path: PathBuf::from(r.path),
@@ -80,7 +80,7 @@ impl BookmarkStore {
 
     fn write_all(&self, entries: &[BookmarkEntry]) -> Result<()> {
         let file = BookmarkFile {
-            bookmark: entries
+            bookmarks: entries
                 .iter()
                 .map(|e| BookmarkRecord {
                     path: e.path.to_string_lossy().into_owned(),
@@ -88,8 +88,10 @@ impl BookmarkStore {
                 })
                 .collect(),
         };
-        let content = toml::to_string_pretty(&file)
-            .context("failed to serialize bookmarks to TOML")?;
+        // Pretty JSON so the file stays readable when opened by hand.
+        let mut content = serde_json::to_string_pretty(&file)
+            .context("failed to serialize bookmarks to JSON")?;
+        content.push('\n');
         fs::write(&self.path, &content)
             .with_context(|| format!("failed to write {}", self.path.display()))
     }
