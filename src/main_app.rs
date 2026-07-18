@@ -382,6 +382,12 @@ impl MainApp {
         // Ask OS to trigger a redraw event.
         self.window.request_redraw();
 
+        // Free atlas slots of thumbnails whose files were deleted or modified.
+        for id in self.app_state.take_atlas_removals() {
+            self.texture_atlas
+                .remove_image(&mut self.renderer, &mut self.imgui_textures, id);
+        }
+
         let results = self.app_state.poll_thumbnail_results();
         for result in results {
             self.app_state.apply_thumbnail_info(

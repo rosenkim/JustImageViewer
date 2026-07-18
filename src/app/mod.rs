@@ -1,5 +1,5 @@
 use std::{
-    collections::HashSet,
+    collections::{HashMap, HashSet},
     ffi::OsStr,
     path::{Path, PathBuf},
     sync::Arc,
@@ -104,6 +104,9 @@ pub struct ViewerState {
     selected_paths: HashSet<PathBuf>,
     // Anchor index used to build a range when the user Shift+clicks.
     selection_anchor: Option<usize>,
+    // Atlas image ids whose files were deleted or modified. The render loop
+    // drains this list and frees the atlas slots (needs GPU objects).
+    pending_atlas_removals: Vec<u64>,
     current_image_size: Option<(usize, usize)>,
     needs_image_reload: bool,
     library_width: f32,
@@ -186,6 +189,7 @@ impl ViewerState {
             current_index: None,
             selected_paths: HashSet::new(),
             selection_anchor: None,
+            pending_atlas_removals: Vec::new(),
             current_image_size: None,
             needs_image_reload: false,
             library_width,
@@ -705,8 +709,111 @@ impl ViewerState {
             return;
         };
 
-        let focus_file = self.current_entry().map(|entry| entry.path.clone());
-        self.load_directory(directory, focus_file);
+        self.drop_handles();
+
+        // Remember the focused file by path; indices are invalid after rescan.
+        let focus_path = self.current_entry().map(|entry| entry.path.clone());
+
+        let mut fresh = match media::scan_directory(&directory) {
+            Ok(entries) => entries,
+            Err(err) => {
+                self.status_message =
+                    format!("Failed to refresh {}: {:#}", directory.display(), err);
+                log::error!("Failed to refresh {}: {:#}", directory.display(), err);
+                return;
+            }
+        };
+
+        // Move old entries into a map so we can reuse their thumbnails.
+        let mut old_by_path: HashMap<PathBuf, MediaEntry> = self
+            .media_items
+            .drain(..)
+            .map(|entry| (entry.path.clone(), entry))
+            .collect();
+
+        let mut added = 0usize;
+        let mut updated = 0usize;
+        for entry in fresh.iter_mut() {
+            match old_by_path.remove(&entry.path) {
+                Some(old) => {
+                    if old.file_size == entry.file_size && old.modified_time == entry.modified_time
+                    {
+                        // Unchanged file: keep the existing thumbnail.
+                        entry.thumbnail = old.thumbnail;
+                    } else {
+                        // Modified file: free the stale thumbnail, regenerate later.
+                        updated += 1;
+                        if let Some(thumb) = old.thumbnail {
+                            self.pending_atlas_removals.push(thumb.atlas_image_id);
+                        }
+                    }
+                }
+                None => added += 1,
+            }
+        }
+
+        // Whatever is left in the map belongs to deleted files.
+        let removed = old_by_path.len();
+        for (_, old) in old_by_path {
+            if let Some(thumb) = old.thumbnail {
+                self.pending_atlas_removals.push(thumb.atlas_image_id);
+            }
+        }
+
+        self.media_items = fresh;
+
+        // Point the cursor at the focused file's new position before sorting,
+        // so sort_media_items re-resolves from the right entry.
+        self.current_index = focus_path.as_ref().and_then(|target| {
+            self.media_items
+                .iter()
+                .position(|entry| &entry.path == target)
+        });
+
+        // Drop selection entries for files that no longer exist.
+        let existing: HashSet<&PathBuf> = self.media_items.iter().map(|e| &e.path).collect();
+        self.selected_paths.retain(|path| existing.contains(path));
+
+        // Re-resolve cursor and anchor by path (sort_media_items does this too,
+        // but the currently focused file may have been deleted).
+        self.sort_media_items();
+        if self.current_index.is_none() && !self.media_items.is_empty() {
+            self.set_single_selection(Some(0));
+            self.needs_image_reload = true;
+        } else if self.media_items.is_empty() {
+            self.set_single_selection(None);
+            self.current_image_size = None;
+            self.needs_image_reload = true;
+            self.clear_image_selection_state();
+        } else if !self.is_multi_select()
+            && self
+                .current_entry()
+                .is_some_and(|entry| !self.selected_paths.contains(&entry.path))
+        {
+            // The single selected file was deleted; select the cursor file.
+            self.set_single_selection(self.current_index);
+            self.needs_image_reload = true;
+        } else if updated > 0
+            && self
+                .current_entry()
+                .is_some_and(|entry| entry.thumbnail.is_none())
+        {
+            // The displayed file itself changed on disk: reload the big view.
+            self.needs_image_reload = true;
+        }
+
+        self.status_message = format!(
+            "Refreshed: {} added, {} updated, {} removed",
+            added, updated, removed
+        );
+
+        // Only entries with `thumbnail: None` (new/modified) get regenerated.
+        self.spawn_thumbnail_work();
+    }
+
+    /// Take the atlas ids of stale thumbnails so the render loop can free them.
+    pub fn take_atlas_removals(&mut self) -> Vec<u64> {
+        std::mem::take(&mut self.pending_atlas_removals)
     }
 
     pub fn handle_drop_path(&mut self, path: &Path) {
@@ -855,9 +962,20 @@ impl ViewerState {
         }
     }
 
+    /// Queue every existing thumbnail for atlas removal. Used before the
+    /// media list is fully replaced so old atlas slots do not leak.
+    fn queue_all_thumbnail_removals(&mut self) {
+        for entry in &self.media_items {
+            if let Some(thumb) = &entry.thumbnail {
+                self.pending_atlas_removals.push(thumb.atlas_image_id);
+            }
+        }
+    }
+
     /// Load images from a directory and choose which image to focus first.
     pub fn load_directory(&mut self, directory: PathBuf, focus_file: Option<PathBuf>) {
         self.drop_handles();
+        self.queue_all_thumbnail_removals();
 
         let directory_display = directory.display().to_string();
         match media::scan_directory(&directory) {
@@ -946,6 +1064,7 @@ impl ViewerState {
 
         self.config.last_open_file = Some(file_path.clone());
         self.current_directory = Some(directory);
+        self.queue_all_thumbnail_removals();
         self.media_items = vec![MediaEntry {
             path: file_path.clone(),
             file_name,

@@ -107,16 +107,25 @@ pub fn scan_directory(root: &Path) -> Result<Vec<MediaEntry>> {
             continue;
         };
 
-        let metadata = entry
-            .metadata()
-            .with_context(|| format!("failed to read metadata for {}", path.display()))?;
-
-        let file_size = metadata.len();
-        let modified_time = metadata
-            .modified()
-            .ok()
-            .and_then(|time| time.duration_since(UNIX_EPOCH).ok())
-            .unwrap_or_default();
+        // A file may be mid-write while we scan (e.g. during Refresh). Do not
+        // abort the whole scan: keep the entry with default metadata so the UI
+        // shows the empty-image icon. The zeroed size/mtime will not match the
+        // real values on the next Refresh, so the file is picked up as modified
+        // and its thumbnail is regenerated then.
+        let (file_size, modified_time) = match entry.metadata() {
+            Ok(metadata) => {
+                let modified_time = metadata
+                    .modified()
+                    .ok()
+                    .and_then(|time| time.duration_since(UNIX_EPOCH).ok())
+                    .unwrap_or_default();
+                (metadata.len(), modified_time)
+            }
+            Err(err) => {
+                log::warn!("failed to read metadata for {}: {err}", path.display());
+                (0, Duration::default())
+            }
+        };
 
         let file_name = path
             .file_name()
