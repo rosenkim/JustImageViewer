@@ -14,7 +14,7 @@ use crate::{
     core::media::{self, MediaEntry, ThumbnailInfo},
     infra::{
         bookmark::{BookmarkEntry, BookmarkStore, sort_bookmarks},
-        config::AppConfig,
+        config::{AppConfig, OpenDirectoryConfig},
     },
     render::{
         image_uploader::UploadedTexture,
@@ -52,6 +52,73 @@ pub enum SortDirection {
     #[default]
     Ascending,
     Descending,
+}
+
+pub const MAX_OPEN_DIRECTORIES: usize = 3;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct DirectoryId(u64);
+
+/// State owned by one row in the Library panel.
+pub struct DirectorySession {
+    id: DirectoryId,
+    directory: PathBuf,
+    media_items: Vec<MediaEntry>,
+    current_index: Option<usize>,
+    selected_paths: HashSet<PathBuf>,
+    selection_anchor: Option<usize>,
+    pending_scroll_to_selection: bool,
+    pending_scroll_direction: i32,
+    items_per_row: usize,
+}
+
+impl DirectorySession {
+    fn new(id: DirectoryId, directory: PathBuf, media_items: Vec<MediaEntry>) -> Self {
+        Self {
+            id,
+            directory,
+            media_items,
+            current_index: None,
+            selected_paths: HashSet::new(),
+            selection_anchor: None,
+            pending_scroll_to_selection: false,
+            pending_scroll_direction: 0,
+            items_per_row: 1,
+        }
+    }
+
+    pub fn id(&self) -> DirectoryId {
+        self.id
+    }
+
+    pub fn directory(&self) -> &Path {
+        &self.directory
+    }
+
+    pub fn media_items(&self) -> &[MediaEntry] {
+        &self.media_items
+    }
+
+    pub fn current_index(&self) -> Option<usize> {
+        self.current_index
+    }
+
+    pub fn current_entry(&self) -> Option<&MediaEntry> {
+        self.current_index
+            .and_then(|index| self.media_items.get(index))
+    }
+
+    pub fn is_multi_select(&self) -> bool {
+        self.selected_paths.len() > 1
+    }
+
+    pub fn selected_count(&self) -> usize {
+        self.selected_paths.len()
+    }
+
+    pub fn is_path_selected(&self, path: &Path) -> bool {
+        self.selected_paths.contains(path)
+    }
 }
 
 fn normalize_library_width(width: f32) -> f32 {
@@ -96,14 +163,9 @@ pub struct ViewerState {
     show_keyboard_shortcuts: bool,
     show_bookmark_window: bool,
     show_selection_window: bool,
-    current_directory: Option<PathBuf>,
-    media_items: Vec<MediaEntry>,
-    current_index: Option<usize>,
-    // Paths of every file in the multi-selection. One path means single-select,
-    // more than one means multi-select. `current_index` is the keyboard cursor.
-    selected_paths: HashSet<PathBuf>,
-    // Anchor index used to build a range when the user Shift+clicks.
-    selection_anchor: Option<usize>,
+    directories: Vec<DirectorySession>,
+    active_directory_id: Option<DirectoryId>,
+    next_directory_id: u64,
     // Atlas image ids whose files were deleted or modified. The render loop
     // drains this list and frees the atlas slots (needs GPU objects).
     pending_atlas_removals: Vec<u64>,
@@ -115,9 +177,6 @@ pub struct ViewerState {
     sort_direction: SortDirection,
     show_thumbnail: bool,
     show_grid_view: bool,
-    pending_library_scroll_to_selection: bool,
-    pending_library_scroll_direction: i32,
-    library_items_per_row: usize,
     image_selection: Option<Rect2D>,
     image_selection_drag_start: Option<[f32; 2]>,
     image_selection_drag_mode: Option<ImageSelectionDragMode>,
@@ -127,14 +186,14 @@ pub struct ViewerState {
 
     current_texture: Option<UploadedTexture>,
 
-    worker_handles: Vec<tokio::task::JoinHandle<()>>,
-    thumbnail_tx: Option<mpsc::Sender<ThumbnailResult>>,
-    thumbnail_rx: Option<mpsc::Receiver<ThumbnailResult>>,
+    worker_handles: HashMap<DirectoryId, tokio::task::JoinHandle<()>>,
+    thumbnail_tx: mpsc::Sender<ThumbnailResult>,
+    thumbnail_rx: mpsc::Receiver<ThumbnailResult>,
 }
 
 /// Decoded thumbnail pixels sent from the worker task back to the main thread.
 pub struct ThumbnailResult {
-    pub index: usize,
+    pub directory_id: DirectoryId,
     pub path: PathBuf,
     pub width: u32,
     pub height: u32,
@@ -174,6 +233,8 @@ impl ViewerState {
             }
         };
 
+        let (thumbnail_tx, thumbnail_rx) = mpsc::channel::<ThumbnailResult>(64);
+
         Self {
             config,
             config_path,
@@ -184,11 +245,9 @@ impl ViewerState {
             show_keyboard_shortcuts: false,
             show_bookmark_window: false,
             show_selection_window,
-            current_directory: None,
-            media_items: Vec::new(),
-            current_index: None,
-            selected_paths: HashSet::new(),
-            selection_anchor: None,
+            directories: Vec::new(),
+            active_directory_id: None,
+            next_directory_id: 1,
             pending_atlas_removals: Vec::new(),
             current_image_size: None,
             needs_image_reload: false,
@@ -198,9 +257,6 @@ impl ViewerState {
             sort_direction,
             show_thumbnail,
             show_grid_view,
-            pending_library_scroll_to_selection: false,
-            pending_library_scroll_direction: 0,
-            library_items_per_row: 1,
             image_selection: None,
             image_selection_drag_start: None,
             image_selection_drag_mode: None,
@@ -210,9 +266,9 @@ impl ViewerState {
 
             current_texture: None,
 
-            worker_handles: Vec::new(),
-            thumbnail_tx: None,
-            thumbnail_rx: None,
+            worker_handles: HashMap::new(),
+            thumbnail_tx,
+            thumbnail_rx,
         }
     }
 
@@ -271,35 +327,49 @@ impl ViewerState {
         &self.config_path
     }
 
-    pub fn restore_last_directory(&self) -> bool {
-        self.config.restore_last_directory
-    }
-
-    pub fn restore_candidate(&self) -> Option<&Path> {
-        if !self.config.restore_last_directory {
-            return None;
-        }
-        self.config.last_open_file.as_deref()
-    }
-
     pub fn config(&self) -> &AppConfig {
         &self.config
     }
 
+    pub fn directory_sessions(&self) -> &[DirectorySession] {
+        &self.directories
+    }
+
+    pub fn active_directory_id(&self) -> Option<DirectoryId> {
+        self.active_directory_id
+    }
+
+    pub fn directory_session(&self, id: DirectoryId) -> Option<&DirectorySession> {
+        self.directories.iter().find(|session| session.id == id)
+    }
+
+    fn directory_session_mut(&mut self, id: DirectoryId) -> Option<&mut DirectorySession> {
+        self.directories.iter_mut().find(|session| session.id == id)
+    }
+
+    fn active_session(&self) -> Option<&DirectorySession> {
+        self.active_directory_id.and_then(|id| self.directory_session(id))
+    }
+
+    fn active_session_mut(&mut self) -> Option<&mut DirectorySession> {
+        let id = self.active_directory_id?;
+        self.directory_session_mut(id)
+    }
+
     pub fn current_directory(&self) -> Option<&Path> {
-        self.current_directory.as_deref()
+        self.active_session().map(DirectorySession::directory)
     }
 
     pub fn media_items(&self) -> &[MediaEntry] {
-        &self.media_items
+        self.active_session().map_or(&[], DirectorySession::media_items)
     }
 
     pub fn current_index(&self) -> Option<usize> {
-        self.current_index
+        self.active_session().and_then(DirectorySession::current_index)
     }
 
     pub fn current_entry(&self) -> Option<&MediaEntry> {
-        self.current_index.and_then(|idx| self.media_items.get(idx))
+        self.active_session().and_then(DirectorySession::current_entry)
     }
 
     pub fn bookmarks(&self) -> &[BookmarkEntry] {
@@ -371,7 +441,7 @@ impl ViewerState {
             return;
         }
         self.library_sort_field = field;
-        self.sort_media_items();
+        self.sort_all_media_items();
     }
 
     pub fn sort_direction(&self) -> SortDirection {
@@ -384,7 +454,7 @@ impl ViewerState {
             return;
         }
         self.sort_direction = direction;
-        self.sort_media_items();
+        self.sort_all_media_items();
     }
 
     pub fn show_thumbnail(&self) -> bool {
@@ -406,34 +476,56 @@ impl ViewerState {
     }
 
     pub fn library_items_per_row(&self) -> usize {
-        self.library_items_per_row.max(1)
+        self.active_session().map_or(1, |session| session.items_per_row.max(1))
     }
 
-    pub fn set_library_items_per_row(&mut self, items_per_row: usize) {
+    pub fn set_library_items_per_row(&mut self, id: DirectoryId, items_per_row: usize) {
         // Keep this value always valid so keyboard move is safe.
-        self.library_items_per_row = items_per_row.max(1);
+        if let Some(session) = self.directory_session_mut(id) {
+            session.items_per_row = items_per_row.max(1);
+        }
+    }
+
+    pub fn activate_directory(&mut self, id: DirectoryId) {
+        if self.active_directory_id == Some(id) || self.directory_session(id).is_none() {
+            return;
+        }
+        self.active_directory_id = Some(id);
+        self.needs_image_reload = true;
+        self.current_image_size = None;
+        self.clear_image_selection_state();
+        self.sync_restore_config();
     }
 
     /// Select exactly one item (single-select). Moves the cursor, resets the
     /// selection set to this item, and asks the viewer to decode its image.
     pub fn select_index(&mut self, index: usize) {
-        if index < self.media_items.len() {
-            let delta = index as i32 - self.current_index.unwrap_or(0) as i32;
-            self.current_index = Some(index);
-            self.set_single_selection(Some(index));
+        let changed = if let Some(session) = self.active_session_mut() {
+            if index >= session.media_items.len() {
+                false
+            } else {
+                let delta = index as i32 - session.current_index.unwrap_or(0) as i32;
+                session.current_index = Some(index);
+                Self::set_single_selection(session, Some(index));
+                session.pending_scroll_to_selection = true;
+                session.pending_scroll_direction = delta.signum();
+                true
+            }
+        } else {
+            false
+        };
+        if changed {
             self.needs_image_reload = true;
-            self.pending_library_scroll_to_selection = true;
-            self.pending_library_scroll_direction = delta.signum();
             self.clear_image_selection_state();
-            self.sync_last_open_file();
+            self.sync_restore_config();
         }
     }
 
     pub fn advance_selection(&mut self, delta: i32) {
-        let Some(current) = self.current_index else {
+        let Some(current) = self.current_index() else {
             return;
         };
-        let total = self.media_items.len();
+        let total = self.media_items().len();
         if total == 0 {
             return;
         }
@@ -446,130 +538,141 @@ impl ViewerState {
 
     /// Reset the selection set so it holds only the file at `index` (or nothing
     /// when `index` is `None`). Also records that index as the range anchor.
-    fn set_single_selection(&mut self, index: Option<usize>) {
-        self.selected_paths.clear();
-        self.selection_anchor = index;
-        if let Some(path) = index.and_then(|i| self.media_items.get(i)).map(|e| e.path.clone()) {
-            self.selected_paths.insert(path);
+    fn set_single_selection(session: &mut DirectorySession, index: Option<usize>) {
+        session.selected_paths.clear();
+        session.selection_anchor = index;
+        if let Some(path) = index.and_then(|i| session.media_items.get(i)).map(|e| e.path.clone()) {
+            session.selected_paths.insert(path);
         }
     }
 
     /// Toggle a single file in or out of the selection (Shift+click). Clicking an
     /// unselected file adds it; clicking a selected file removes it.
     pub fn toggle_selection_at(&mut self, index: usize) {
-        let Some(path) = self.media_items.get(index).map(|entry| entry.path.clone()) else {
+        let mut reload = false;
+        let Some(session) = self.active_session_mut() else {
+            return;
+        };
+        let Some(path) = session
+            .media_items
+            .get(index)
+            .map(|entry| entry.path.clone())
+        else {
             return;
         };
 
-        if self.selected_paths.contains(&path) {
-            self.selected_paths.remove(&path);
+        if session.selected_paths.contains(&path) {
+            session.selected_paths.remove(&path);
         } else {
-            self.selected_paths.insert(path);
+            session.selected_paths.insert(path);
         }
-        self.selection_anchor = Some(index);
-        self.current_index = Some(index);
-        self.pending_library_scroll_to_selection = true;
-        self.pending_library_scroll_direction = 0;
-        self.clear_image_selection_state();
+        session.selection_anchor = Some(index);
+        session.current_index = Some(index);
+        session.pending_scroll_to_selection = true;
+        session.pending_scroll_direction = 0;
 
-        match self.selected_paths.len() {
+        match session.selected_paths.len() {
             // Nothing selected: clear the cursor and the viewer.
             0 => {
-                self.current_index = None;
-                self.current_image_size = None;
-                self.needs_image_reload = true;
+                session.current_index = None;
+                reload = true;
             }
             // Collapsed to one file: show it as a single image and move the
             // cursor onto it (it may differ from the file just clicked).
             1 => {
-                if let Some(only) = self.selected_paths.iter().next().cloned()
-                    && let Some(i) = self.media_items.iter().position(|e| e.path == only)
+                if let Some(only) = session.selected_paths.iter().next().cloned()
+                    && let Some(i) = session.media_items.iter().position(|e| e.path == only)
                 {
-                    self.current_index = Some(i);
+                    session.current_index = Some(i);
                 }
-                self.needs_image_reload = true;
+                reload = true;
             }
             // Still multiple: the viewer keeps showing the thumbnail grid.
             _ => {}
         }
-        self.sync_last_open_file();
+        self.clear_image_selection_state();
+        if reload {
+            self.current_image_size = None;
+            self.needs_image_reload = true;
+        }
+        self.sync_restore_config();
     }
 
     /// True when more than one file is selected (multi-select mode).
     pub fn is_multi_select(&self) -> bool {
-        self.selected_paths.len() > 1
+        self.active_session().is_some_and(DirectorySession::is_multi_select)
     }
 
     /// Number of files currently selected.
     pub fn selected_count(&self) -> usize {
-        self.selected_paths.len()
+        self.active_session().map_or(0, DirectorySession::selected_count)
     }
 
     /// True when `path` is part of the current selection.
     pub fn is_path_selected(&self, path: &Path) -> bool {
-        self.selected_paths.contains(path)
+        self.active_session().is_some_and(|session| session.is_path_selected(path))
     }
 
     /// Selected entries, yielded in library (display) order.
     pub fn selected_entries(&self) -> impl Iterator<Item = &MediaEntry> {
-        self.media_items
-            .iter()
-            .filter(|entry| self.selected_paths.contains(&entry.path))
+        self.media_items().iter().filter(|entry| self.is_path_selected(&entry.path))
     }
 
     /// Move only the keyboard cursor by `delta` without touching the selection.
     /// Used while multiple files are selected.
     pub fn move_cursor(&mut self, delta: i32) {
-        let Some(current) = self.current_index else {
+        let Some(session) = self.active_session_mut() else {
             return;
         };
-        let total = self.media_items.len();
+        let Some(current) = session.current_index else {
+            return;
+        };
+        let total = session.media_items.len();
         if total == 0 {
             return;
         }
         let next = ((current as i32 + delta).rem_euclid(total as i32)) as usize;
         if next != current {
-            self.current_index = Some(next);
-            self.pending_library_scroll_to_selection = true;
-            self.pending_library_scroll_direction = (next as i32 - current as i32).signum();
+            session.current_index = Some(next);
+            session.pending_scroll_to_selection = true;
+            session.pending_scroll_direction = (next as i32 - current as i32).signum();
         }
+        self.sync_restore_config();
     }
 
     /// Move only the keyboard cursor to an absolute index (e.g. Home/End) while
     /// multiple files are selected.
     pub fn move_cursor_to(&mut self, index: usize) {
-        if index >= self.media_items.len() {
+        let Some(session) = self.active_session_mut() else {
+            return;
+        };
+        if index >= session.media_items.len() {
             return;
         }
-        let delta = index as i32 - self.current_index.unwrap_or(0) as i32;
-        self.current_index = Some(index);
-        self.pending_library_scroll_to_selection = true;
-        self.pending_library_scroll_direction = delta.signum();
+        let delta = index as i32 - session.current_index.unwrap_or(0) as i32;
+        session.current_index = Some(index);
+        session.pending_scroll_to_selection = true;
+        session.pending_scroll_direction = delta.signum();
+        self.sync_restore_config();
     }
 
     /// Collapse a multi-selection down to the single file under the cursor
     /// (triggered by Spacebar).
     pub fn collapse_selection_to_cursor(&mut self) {
-        if let Some(index) = self.current_index {
+        if let Some(index) = self.current_index() {
             self.select_index(index);
         }
     }
 
-    pub fn take_pending_library_scroll_to_selection(&mut self) -> Option<i32> {
-        if !self.pending_library_scroll_to_selection {
+    pub fn take_pending_library_scroll_to_selection(&mut self, id: DirectoryId) -> Option<i32> {
+        let session = self.directory_session_mut(id)?;
+        if !session.pending_scroll_to_selection {
             return None;
         }
-
-        let pending = self.pending_library_scroll_to_selection;
-        let direction = self.pending_library_scroll_direction;
-        self.pending_library_scroll_to_selection = false;
-        self.pending_library_scroll_direction = 0;
-
-        if pending {
-            Some(direction)
-        } else {
-            None
-        }
+        let direction = session.pending_scroll_direction;
+        session.pending_scroll_to_selection = false;
+        session.pending_scroll_direction = 0;
+        Some(direction)
     }
 
     pub fn open_directory_dialog(&mut self) {
@@ -583,7 +686,7 @@ impl ViewerState {
     /// Reveal the directory that is currently open in the system file manager
     /// (Finder on macOS, Explorer on Windows, the default handler on Linux).
     pub fn open_current_directory_in_file_manager(&mut self) {
-        let Some(directory) = self.current_directory.clone() else {
+        let Some(directory) = self.current_directory().map(Path::to_path_buf) else {
             self.status_message = "No directory is currently open".to_owned();
             return;
         };
@@ -625,7 +728,7 @@ impl ViewerState {
     }
 
     pub fn bookmark_current_directory(&mut self) {
-        let Some(directory) = self.current_directory.clone() else {
+        let Some(directory) = self.current_directory().map(Path::to_path_buf) else {
             self.status_message = "No directory is currently open".to_owned();
             return;
         };
@@ -644,16 +747,18 @@ impl ViewerState {
 
     pub fn open_bookmark_path(&mut self, path: &Path) {
         if path.is_dir() {
-            self.load_directory(path.to_path_buf(), None);
-            self.status_message = format!("Opened bookmarked directory: {}", path.display());
+            if self.load_directory(path.to_path_buf(), None) {
+                self.status_message = format!("Opened bookmarked directory: {}", path.display());
+            }
             return;
         }
 
         if path.is_file() {
             if let Some(parent) = path.parent() {
                 self.set_show_library(true);
-                self.load_directory(parent.to_path_buf(), Some(path.to_path_buf()));
-                self.status_message = format!("Opened bookmarked file: {}", path.display());
+                if self.load_directory(parent.to_path_buf(), Some(path.to_path_buf())) {
+                    self.status_message = format!("Opened bookmarked file: {}", path.display());
+                }
             } else {
                 self.status_message = format!(
                     "Bookmarked file has no parent directory: {}",
@@ -704,15 +809,20 @@ impl ViewerState {
     }
 
     pub fn refresh_current_directory(&mut self) {
-        let Some(directory) = self.current_directory.clone() else {
+        let Some(id) = self.active_directory_id else {
             self.status_message = "No directory is currently open".to_owned();
             return;
         };
-
-        self.drop_handles();
-
-        // Remember the focused file by path; indices are invalid after rescan.
-        let focus_path = self.current_entry().map(|entry| entry.path.clone());
+        let Some(directory) = self
+            .directory_session(id)
+            .map(|session| session.directory.clone())
+        else {
+            return;
+        };
+        let focus_path = self
+            .directory_session(id)
+            .and_then(DirectorySession::current_entry)
+            .map(|entry| entry.path.clone());
 
         let mut fresh = match media::scan_directory(&directory) {
             Ok(entries) => entries,
@@ -724,10 +834,16 @@ impl ViewerState {
             }
         };
 
+        self.cancel_thumbnail_work(id);
+
+        let old_items = self
+            .directory_session_mut(id)
+            .map(|session| std::mem::take(&mut session.media_items))
+            .unwrap_or_default();
+
         // Move old entries into a map so we can reuse their thumbnails.
-        let mut old_by_path: HashMap<PathBuf, MediaEntry> = self
-            .media_items
-            .drain(..)
+        let mut old_by_path: HashMap<PathBuf, MediaEntry> = old_items
+            .into_iter()
             .map(|entry| (entry.path.clone(), entry))
             .collect();
 
@@ -760,47 +876,40 @@ impl ViewerState {
             }
         }
 
-        self.media_items = fresh;
-
-        // Point the cursor at the focused file's new position before sorting,
-        // so sort_media_items re-resolves from the right entry.
-        self.current_index = focus_path.as_ref().and_then(|target| {
-            self.media_items
+        let sort_field = self.library_sort_field;
+        let sort_direction = self.sort_direction;
+        if let Some(session) = self.directory_session_mut(id) {
+            session.media_items = fresh;
+            let existing: HashSet<PathBuf> = session
+                .media_items
                 .iter()
-                .position(|entry| &entry.path == target)
-        });
+                .map(|entry| entry.path.clone())
+                .collect();
+            session.selected_paths.retain(|path| existing.contains(path));
+            session.current_index = focus_path.as_ref().and_then(|target| {
+                session
+                    .media_items
+                    .iter()
+                    .position(|entry| &entry.path == target)
+            });
+            Self::sort_session(session, sort_field, sort_direction);
 
-        // Drop selection entries for files that no longer exist.
-        let existing: HashSet<&PathBuf> = self.media_items.iter().map(|e| &e.path).collect();
-        self.selected_paths.retain(|path| existing.contains(path));
-
-        // Re-resolve cursor and anchor by path (sort_media_items does this too,
-        // but the currently focused file may have been deleted).
-        self.sort_media_items();
-        if self.current_index.is_none() && !self.media_items.is_empty() {
-            self.set_single_selection(Some(0));
-            self.needs_image_reload = true;
-        } else if self.media_items.is_empty() {
-            self.set_single_selection(None);
-            self.current_image_size = None;
-            self.needs_image_reload = true;
-            self.clear_image_selection_state();
-        } else if !self.is_multi_select()
-            && self
-                .current_entry()
-                .is_some_and(|entry| !self.selected_paths.contains(&entry.path))
-        {
-            // The single selected file was deleted; select the cursor file.
-            self.set_single_selection(self.current_index);
-            self.needs_image_reload = true;
-        } else if updated > 0
-            && self
-                .current_entry()
-                .is_some_and(|entry| entry.thumbnail.is_none())
-        {
-            // The displayed file itself changed on disk: reload the big view.
-            self.needs_image_reload = true;
+            if session.current_index.is_none() && !session.media_items.is_empty() {
+                Self::set_single_selection(session, Some(0));
+            } else if session.media_items.is_empty() {
+                Self::set_single_selection(session, None);
+            } else if !session.is_multi_select()
+                && session
+                    .current_entry()
+                    .is_some_and(|entry| !session.selected_paths.contains(&entry.path))
+            {
+                Self::set_single_selection(session, session.current_index);
+            }
         }
+
+        self.current_image_size = None;
+        self.needs_image_reload = true;
+        self.clear_image_selection_state();
 
         self.status_message = format!(
             "Refreshed: {} added, {} updated, {} removed",
@@ -808,7 +917,8 @@ impl ViewerState {
         );
 
         // Only entries with `thumbnail: None` (new/modified) get regenerated.
-        self.spawn_thumbnail_work();
+        self.sync_restore_config();
+        self.spawn_thumbnail_work(id);
     }
 
     /// Take the atlas ids of stale thumbnails so the render loop can free them.
@@ -826,43 +936,41 @@ impl ViewerState {
         }
     }
 
-    fn drop_handles(&mut self) {
-        for handle in self.worker_handles.iter() {
-            if !handle.is_finished() {
-                handle.abort();
-            }
+    fn cancel_thumbnail_work(&mut self, id: DirectoryId) {
+        if let Some(handle) = self.worker_handles.remove(&id) {
+            handle.abort();
         }
-
-        self.thumbnail_rx = None;
-        self.thumbnail_tx = None;
-        self.worker_handles.clear();
     }
 
-    fn spawn_thumbnail_work(&mut self) {
-        // Collect (index, path) pairs for entries that don't have a thumbnail yet.
-        let paths: Vec<(usize, PathBuf)> = self
-            .media_items
-            .iter()
-            .enumerate()
-            .filter(|(_, entry)| entry.thumbnail.is_none())
-            .map(|(i, entry)| (i, entry.path.clone()))
-            .collect();
+    fn spawn_thumbnail_work(&mut self, id: DirectoryId) {
+        self.cancel_thumbnail_work(id);
+        let paths: Vec<PathBuf> = self
+            .directory_session(id)
+            .map(|session| {
+                session
+                    .media_items
+                    .iter()
+                    .filter(|entry| entry.thumbnail.is_none())
+                    .map(|entry| entry.path.clone())
+                    .collect()
+            })
+            .unwrap_or_default();
 
         if paths.is_empty() {
             return;
         }
 
-        let (tx, rx) = mpsc::channel::<ThumbnailResult>(64);
-        self.thumbnail_tx = Some(tx.clone());
-        self.thumbnail_rx = Some(rx);
-
+        let tx = self.thumbnail_tx.clone();
         let handle = tokio::task::spawn(async move {
-            for (index, path) in paths {
-                // Use spawn_blocking so heavy image decoding doesn't block the async runtime.
+            for path in paths {
+                // Decode off the async runtime because image codecs are blocking.
                 let result = tokio::task::spawn_blocking({
                     let path = path.clone();
-                    move || -> anyhow::Result<crate::core::image_loader::DecodedImage> {
-                        image_loader::load_thumbnail_rgba(&path, crate::constants::THUMBNAIL_IMAGE_SIZE)
+                    move || {
+                        image_loader::load_thumbnail_rgba(
+                            &path,
+                            crate::constants::THUMBNAIL_IMAGE_SIZE,
+                        )
                     }
                 })
                 .await;
@@ -870,56 +978,50 @@ impl ViewerState {
                 match result {
                     Ok(Ok(decoded)) => {
                         let msg = ThumbnailResult {
-                            index,
+                            directory_id: id,
                             path,
                             width: decoded.width as u32,
                             height: decoded.height as u32,
                             pixels: decoded.pixels,
                         };
-                        // If the receiver has been dropped (new directory loaded), stop.
                         if tx.send(msg).await.is_err() {
                             break;
                         }
                     }
                     Ok(Err(err)) => {
-                        log::warn!("Failed to load thumbnail for {}: {:#}", path.display(), err);
+                        log::warn!("Failed to load thumbnail for {}: {:#}", path.display(), err)
                     }
                     Err(err) => {
-                        log::warn!("Thumbnail task panicked for {}: {:#}", path.display(), err);
+                        log::warn!("Thumbnail task panicked for {}: {:#}", path.display(), err)
                     }
                 }
-
                 tokio::task::yield_now().await;
             }
         });
-
-        self.worker_handles.push(handle);
+        self.worker_handles.insert(id, handle);
     }
 
-    /// Drain pending thumbnail results from the worker channel.
-    /// Returns raw decoded pixel data; the caller is responsible for uploading
-    /// to the GPU atlas and then calling `apply_thumbnail_info`.
+    /// Drain valid results for every open directory.
     pub fn poll_thumbnail_results(&mut self) -> Vec<ThumbnailResult> {
-        let Some(rx) = self.thumbnail_rx.as_mut() else {
-            return Vec::new();
-        };
-
-        let mut results = Vec::new();
-        while let Ok(result) = rx.try_recv() {
-            // Only keep results that still correspond to the current media list.
-            if self
-                .media_items
-                .get(result.index)
-                .is_some_and(|entry| entry.path == result.path)
-            {
-                results.push(result);
-            }
+        let mut pending = Vec::new();
+        while let Ok(result) = self.thumbnail_rx.try_recv() {
+            pending.push(result);
         }
-        results
+        pending
+            .into_iter()
+            .filter(|result| {
+                self.directory_session(result.directory_id)
+                    .is_some_and(|session| {
+                        session
+                            .media_items
+                            .iter()
+                            .any(|entry| entry.path == result.path)
+                    })
+            })
+            .collect()
     }
 
-    /// Upload thumbnail pixels to the GPU atlas and write the resulting
-    /// `ThumbnailInfo` back into the corresponding `MediaEntry`.
+    /// Upload thumbnail pixels and attach them to the matching directory entry.
     pub fn apply_thumbnail_info(
         &mut self,
         result: ThumbnailResult,
@@ -929,11 +1031,16 @@ impl ViewerState {
         imgui_textures: &mut ImguiTextures,
         texture_atlas: &mut TextureAtlasManager,
     ) {
-        // Check index/path are still valid before doing expensive GPU work.
-        let entry = match self.media_items.get_mut(result.index) {
-            Some(e) if e.path == result.path => e,
-            _ => return,
+        let Some(session) = self.directory_session(result.directory_id) else {
+            return;
         };
+        if !session
+            .media_items
+            .iter()
+            .any(|entry| entry.path == result.path)
+        {
+            return;
+        }
 
         match texture_atlas.load_image(
             device,
@@ -945,90 +1052,133 @@ impl ViewerState {
             &result.pixels,
         ) {
             Ok(region) => {
-                entry.thumbnail = Some(ThumbnailInfo {
-                    atlas_image_id: region.id,
-                    texture_index: region.texture_id,
-                    uvs: region.uvs,
-                    image_size: region.image_size,
-                });
+                if let Some(entry) = self.directory_session_mut(result.directory_id)
+                    .and_then(|session| session.media_items.iter_mut().find(|entry| entry.path == result.path))
+                {
+                    entry.thumbnail = Some(ThumbnailInfo {
+                        atlas_image_id: region.id,
+                        texture_index: region.texture_id,
+                        uvs: region.uvs,
+                        image_size: region.image_size,
+                    });
+                } else {
+                    texture_atlas.remove_image(renderer, imgui_textures, region.id);
+                }
             }
-            Err(err) => {
-                log::warn!(
-                    "Failed to upload thumbnail for {}: {:#}",
-                    result.path.display(),
-                    err
-                );
-            }
+            Err(err) => log::warn!(
+                "Failed to upload thumbnail for {}: {:#}",
+                result.path.display(),
+                err
+            ),
         }
     }
 
-    /// Queue every existing thumbnail for atlas removal. Used before the
-    /// media list is fully replaced so old atlas slots do not leak.
-    fn queue_all_thumbnail_removals(&mut self) {
-        for entry in &self.media_items {
-            if let Some(thumb) = &entry.thumbnail {
-                self.pending_atlas_removals.push(thumb.atlas_image_id);
-            }
+    fn queue_session_thumbnail_removals(&mut self, id: DirectoryId) {
+        let ids: Vec<u64> = self
+            .directory_session(id)
+            .into_iter()
+            .flat_map(|session| session.media_items.iter())
+            .filter_map(|entry| entry.thumbnail.map(|thumbnail| thumbnail.atlas_image_id))
+            .collect();
+        self.pending_atlas_removals.extend(ids);
+    }
+
+    pub fn close_directory(&mut self, id: DirectoryId) {
+        let Some(index) = self
+            .directories
+            .iter()
+            .position(|session| session.id == id)
+        else {
+            return;
+        };
+        let was_active = self.active_directory_id == Some(id);
+        let directory = self.directories[index].directory.clone();
+        self.cancel_thumbnail_work(id);
+        self.queue_session_thumbnail_removals(id);
+        self.directories.remove(index);
+
+        if was_active {
+            self.active_directory_id = self
+                .directories
+                .get(index)
+                .or_else(|| self.directories.last())
+                .map(|session| session.id);
+            self.current_image_size = None;
+            self.needs_image_reload = true;
+            self.clear_image_selection_state();
+        }
+        self.status_message = format!("Closed directory: {}", directory.display());
+        self.sync_restore_config();
+    }
+
+    fn evict_oldest_if_full(&mut self) {
+        if self.directories.len() == MAX_OPEN_DIRECTORIES {
+            let oldest = self.directories[0].id;
+            self.close_directory(oldest);
         }
     }
 
     /// Load images from a directory and choose which image to focus first.
-    pub fn load_directory(&mut self, directory: PathBuf, focus_file: Option<PathBuf>) {
-        self.drop_handles();
-        self.queue_all_thumbnail_removals();
-
+    pub fn load_directory(&mut self, directory: PathBuf, focus_file: Option<PathBuf>) -> bool {
+        let directory = std::fs::canonicalize(&directory).unwrap_or(directory);
+        let focus_file = focus_file.map(|path| std::fs::canonicalize(&path).unwrap_or(path));
         let directory_display = directory.display().to_string();
-        match media::scan_directory(&directory) {
-            Ok(entries) => {
-                let total = entries.len();
-                if total == 0 {
-                    self.status_message = format!(
-                        "No supported images in {} (PNG, JPEG, BMP, GIF, WebP, TIFF, TGA, ICO, PNM, DDS, Farbfeld)",
-                        directory_display
-                    );
-                    self.config.last_open_file = None;
-                    self.current_directory = Some(directory);
-                    self.media_items.clear();
-                    self.current_index = None;
-                    self.set_single_selection(None);
-                    self.current_image_size = None;
-                    self.needs_image_reload = false;
-                    self.clear_image_selection_state();
-                    return;
-                }
-
-                self.current_directory = Some(directory);
-                self.media_items = entries;
-                self.sort_media_items();
-                let focus_index = focus_file
-                    .as_ref()
-                    .and_then(|target| {
-                        self.media_items
-                            .iter()
-                            .position(|entry| entry.path == *target)
-                    })
-                    .or(Some(0));
-                self.current_index = focus_index;
-                self.set_single_selection(focus_index);
-                self.config.last_open_file = self
-                    .current_index
-                    .and_then(|i| self.media_items.get(i))
-                    .map(|e| e.path.clone());
-                self.current_image_size = None;
-                self.status_message = format!("Loaded {} images from {}", total, directory_display);
-                self.needs_image_reload = true;
-                self.pending_library_scroll_to_selection = true;
-                self.pending_library_scroll_direction = 0;
-                self.clear_image_selection_state();
-
-                // spawn thumbnails work
-                self.spawn_thumbnail_work();
+        if let Some(id) = self
+            .directories
+            .iter()
+            .find(|session| session.directory == directory)
+            .map(|session| session.id)
+        {
+            self.activate_directory(id);
+            if let Some(target) = focus_file.as_ref()
+                && let Some(index) = self.directory_session(id).and_then(|session| {
+                    session
+                        .media_items
+                        .iter()
+                        .position(|entry| &entry.path == target)
+                })
+            {
+                self.select_index(index);
             }
+            self.status_message = format!("Focused open directory: {}", directory_display);
+            return true;
+        }
+
+        let entries = match media::scan_directory(&directory) {
+            Ok(entries) => entries,
             Err(err) => {
                 self.status_message = format!("Failed to read {}: {:#}", directory_display, err);
                 log::error!("Failed to load directory {}: {:#}", directory_display, err);
+                return false;
             }
-        }
+        };
+
+        self.evict_oldest_if_full();
+
+        let id = DirectoryId(self.next_directory_id);
+        self.next_directory_id += 1;
+        let total = entries.len();
+        let mut session = DirectorySession::new(id, directory, entries);
+        Self::sort_session(&mut session, self.library_sort_field, self.sort_direction);
+        let focus_index = focus_file.as_ref()
+            .and_then(|target| session.media_items.iter().position(|entry| &entry.path == target))
+            .or_else(|| (!session.media_items.is_empty()).then_some(0));
+        session.current_index = focus_index;
+        Self::set_single_selection(&mut session, focus_index);
+        session.pending_scroll_to_selection = true;
+        self.directories.push(session);
+        self.active_directory_id = Some(id);
+        self.current_image_size = None;
+        self.needs_image_reload = true;
+        self.clear_image_selection_state();
+        self.status_message = if total == 0 {
+            format!("No supported images in {}", directory_display)
+        } else {
+            format!("Loaded {} images from {}", total, directory_display)
+        };
+        self.sync_restore_config();
+        self.spawn_thumbnail_work(id);
+        true
     }
 
     fn load_single_file(&mut self, file_path: PathBuf) -> anyhow::Result<()> {
@@ -1062,10 +1212,7 @@ impl ViewerState {
             .ok()
             .map(|(width, height)| (width as usize, height as usize));
 
-        self.config.last_open_file = Some(file_path.clone());
-        self.current_directory = Some(directory);
-        self.queue_all_thumbnail_removals();
-        self.media_items = vec![MediaEntry {
+        let entry = MediaEntry {
             path: file_path.clone(),
             file_name,
             format,
@@ -1073,13 +1220,19 @@ impl ViewerState {
             modified_time,
             dimensions,
             thumbnail: None,
-        }];
-        self.current_index = Some(0);
-        self.set_single_selection(Some(0));
+        };
+        let id = DirectoryId(self.next_directory_id);
+        self.next_directory_id += 1;
+        let mut session = DirectorySession::new(id, directory, vec![entry]);
+        session.current_index = Some(0);
+        Self::set_single_selection(&mut session, Some(0));
+        self.directories.push(session);
+        self.active_directory_id = Some(id);
         self.current_image_size = None;
         self.needs_image_reload = true;
         self.status_message = format!("Loaded 1 image: {}", file_path.display());
         self.clear_image_selection_state();
+        self.sync_restore_config();
 
         Ok(())
     }
@@ -1099,12 +1252,22 @@ impl ViewerState {
         self.current_texture = texture;
     }
 
-    fn sort_media_items(&mut self) {
-        let selected_path = self.current_entry().map(|entry| entry.path.clone());
-        let sort_direction = self.sort_direction;
+    fn sort_all_media_items(&mut self) {
         let sort_field = self.library_sort_field;
+        let sort_direction = self.sort_direction;
+        for session in &mut self.directories {
+            Self::sort_session(session, sort_field, sort_direction);
+        }
+        self.sync_restore_config();
+    }
 
-        self.media_items.sort_by(|a, b| {
+    fn sort_session(
+        session: &mut DirectorySession,
+        sort_field: LibrarySortField,
+        sort_direction: SortDirection,
+    ) {
+        let selected_path = session.current_entry().map(|entry| entry.path.clone());
+        session.media_items.sort_by(|a, b| {
             let primary = match sort_field {
                 LibrarySortField::Name => {
                     a.file_name.to_lowercase().cmp(&b.file_name.to_lowercase())
@@ -1125,22 +1288,67 @@ impl ViewerState {
             }
         });
 
-        self.current_index = selected_path.as_ref().and_then(|target| {
-            self.media_items
+        session.current_index = selected_path.as_ref().and_then(|target| {
+            session.media_items
                 .iter()
                 .position(|entry| &entry.path == target)
         });
-        // Selection is tracked by path, so it survives the re-sort untouched.
-        // Keep the range anchor aligned with the cursor's new position.
-        self.selection_anchor = self.current_index;
-        self.sync_last_open_file();
+        session.selection_anchor = session.current_index;
     }
 
-    fn sync_last_open_file(&mut self) {
-        self.config.last_open_file = self
-            .current_index
-            .and_then(|i| self.media_items.get(i))
-            .map(|entry| entry.path.clone());
+    fn sync_restore_config(&mut self) {
+        self.config.open_directories = self
+            .directories
+            .iter()
+            .map(|session| OpenDirectoryConfig {
+                path: session.directory.clone(),
+                focused_file: session.current_entry().map(|entry| entry.path.clone()),
+            })
+            .collect();
+        self.config.active_directory = self.current_directory().map(Path::to_path_buf);
+        self.config.last_open_file = self.current_entry().map(|entry| entry.path.clone());
+    }
+
+    /// Restore all saved directory rows. Old settings fall back to last_open_file.
+    pub fn restore_saved_directories(&mut self) {
+        if !self.config.restore_last_directory {
+            return;
+        }
+
+        let saved = self.config.open_directories.clone();
+        let active = self.config.active_directory.clone();
+        let legacy_file = self.config.last_open_file.clone();
+
+        for entry in saved.into_iter().take(MAX_OPEN_DIRECTORIES) {
+            if entry.path.is_dir() {
+                self.load_directory(entry.path, entry.focused_file);
+            } else {
+                log::warn!("Configured open directory is unavailable: {}", entry.path.display());
+            }
+        }
+
+        if self.directories.is_empty() {
+            if let Some(file) = legacy_file
+                && file.is_file()
+                && let Some(parent) = file.parent().map(Path::to_path_buf)
+            {
+                self.load_directory(parent, Some(file));
+            }
+            return;
+        }
+
+        if let Some(active_path) = active {
+            let normalized = std::fs::canonicalize(&active_path).unwrap_or(active_path);
+            if let Some(id) = self
+                .directories
+                .iter()
+                .find(|session| session.directory == normalized)
+                .map(|session| session.id)
+            {
+                self.activate_directory(id);
+            }
+        }
+        self.sync_restore_config();
     }
 
     pub fn copy_region_to_clipboard(&self, selection: Option<Rect2D>) {
@@ -1185,5 +1393,122 @@ pub fn format_file_size(bytes: u64) -> String {
         format!("{} {}", bytes, UNITS[unit_index])
     } else {
         format!("{value:.1} {}", UNITS[unit_index])
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Duration;
+
+    fn test_state() -> ViewerState {
+        ViewerState::new(
+            PathBuf::from("/tmp/just-image-viewer-tests/settings.toml"),
+            AppConfig::default(),
+        )
+    }
+
+    fn media_entry(directory: &str, name: &str) -> MediaEntry {
+        MediaEntry {
+            path: PathBuf::from(directory).join(name),
+            file_name: name.to_owned(),
+            format: media::MediaFormat::Png,
+            file_size: 1,
+            modified_time: Duration::default(),
+            dimensions: Some((1, 1)),
+            thumbnail: None,
+        }
+    }
+
+    fn session(id: u64, directory: &str, names: &[&str]) -> DirectorySession {
+        DirectorySession::new(
+            DirectoryId(id),
+            PathBuf::from(directory),
+            names.iter().map(|name| media_entry(directory, name)).collect(),
+        )
+    }
+
+    #[test]
+    fn switching_directories_keeps_each_selection() {
+        let mut state = test_state();
+        state.directories = vec![
+            session(1, "/first", &["a.png", "b.png"]),
+            session(2, "/second", &["c.png", "d.png"]),
+        ];
+        state.active_directory_id = Some(DirectoryId(1));
+
+        state.select_index(1);
+        state.activate_directory(DirectoryId(2));
+        state.select_index(0);
+        state.activate_directory(DirectoryId(1));
+
+        assert_eq!(
+            state.current_entry().map(|entry| entry.file_name.as_str()),
+            Some("b.png")
+        );
+        assert!(state.is_path_selected(Path::new("/first/b.png")));
+        assert_eq!(state.config.open_directories.len(), 2);
+    }
+
+    #[test]
+    fn closing_active_directory_focuses_the_next_row() {
+        let mut state = test_state();
+        state.directories = vec![
+            session(1, "/first", &[]),
+            session(2, "/second", &[]),
+            session(3, "/third", &[]),
+        ];
+        state.active_directory_id = Some(DirectoryId(2));
+
+        state.close_directory(DirectoryId(2));
+        assert_eq!(state.active_directory_id(), Some(DirectoryId(3)));
+
+        state.close_directory(DirectoryId(3));
+        assert_eq!(state.active_directory_id(), Some(DirectoryId(1)));
+    }
+
+    #[test]
+    fn full_collection_evicts_the_oldest_row() {
+        let mut state = test_state();
+        state.directories = vec![
+            session(1, "/first", &[]),
+            session(2, "/second", &[]),
+            session(3, "/third", &[]),
+        ];
+        state.active_directory_id = Some(DirectoryId(3));
+
+        state.evict_oldest_if_full();
+
+        let paths: Vec<&Path> = state.directories.iter().map(DirectorySession::directory).collect();
+        assert_eq!(paths, vec![Path::new("/second"), Path::new("/third")]);
+        assert_eq!(state.active_directory_id(), Some(DirectoryId(3)));
+    }
+
+    #[test]
+    fn thumbnail_results_are_routed_by_directory_and_path() {
+        let mut state = test_state();
+        state.directories = vec![session(1, "/first", &["a.png"])];
+
+        let make_result = |directory_id, path: &str| ThumbnailResult {
+            directory_id: DirectoryId(directory_id),
+            path: PathBuf::from(path),
+            width: 1,
+            height: 1,
+            pixels: Arc::from([255, 255, 255, 255]),
+        };
+        state
+            .thumbnail_tx
+            .try_send(make_result(1, "/first/a.png"))
+            .expect("valid result should be queued");
+        state
+            .thumbnail_tx
+            .try_send(make_result(2, "/second/b.png"))
+            .expect("stale result should be queued before filtering");
+
+        let results = state.poll_thumbnail_results();
+
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].directory_id, DirectoryId(1));
+        assert_eq!(results[0].path, Path::new("/first/a.png"));
     }
 }

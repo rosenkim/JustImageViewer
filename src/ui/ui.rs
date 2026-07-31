@@ -1,4 +1,7 @@
-use crate::app::{ImageViewMode, LibrarySortField, SortDirection, ViewerState, format_file_size};
+use crate::app::{
+    DirectoryId, DirectorySession, ImageViewMode, LibrarySortField, SortDirection, ViewerState,
+    format_file_size,
+};
 use crate::core::media::MediaEntry;
 use crate::infra::config::BackgroundMode;
 use crate::math::{Point2D, Rect2D};
@@ -52,7 +55,9 @@ pub fn render_ui(
         | imgui::WindowFlags::NO_TITLE_BAR
         | imgui::WindowFlags::NO_BRING_TO_FRONT_ON_FOCUS;
 
-    let mut clicked_index: Option<usize> = None;
+    let mut clicked_item: Option<(DirectoryId, usize)> = None;
+    let mut activate_directory: Option<DirectoryId> = None;
+    let mut close_directory: Option<DirectoryId> = None;
     let mut force_scroll_to_selected = false;
 
     let _style_token = ui.push_style_var(StyleVar::ItemSpacing([0.0, 0.0]));
@@ -90,12 +95,6 @@ pub fn render_ui(
                     .border(true)
                     .build(|| {
                         let _pad = ui.push_style_var(StyleVar::ItemSpacing([4.0, 4.0]));
-                        if let Some(directory) = app_state.current_directory() {
-                            ui.text(format!("Directory: {}", directory.display()));
-                            ui.text(format!("Items: {}", app_state.media_items().len()));
-                        } else {
-                            ui.text("Drag a directory/file or use File > Open Directory");
-                        }
                         ui.text("Sort:");
                         ui.same_line();
                         let mut sort_field_index = match app_state.library_sort_field() {
@@ -146,61 +145,148 @@ pub fn render_ui(
                             force_scroll_to_selected = true;
                         }
                         ui.separator();
-                         // Estimate height of the 2 rows of buttons below (Open/Refresh + Bookmark buttons) add 8.0 for padding.
+                        // Reserve two action rows below the directory lists.
                         let buttons_height =
                             2.0 * ui.frame_height() + ui.clone_style().item_spacing[1] + 8.0;
-                        ui.child_window("library_scroll")
-                            .size([0.0, -buttons_height])
-                            .build(|| {
+                        let ids: Vec<DirectoryId> = app_state
+                            .directory_sessions()
+                            .iter()
+                            .map(DirectorySession::id)
+                            .collect();
+                        let available_rows_height =
+                            (ui.content_region_avail()[1] - buttons_height).max(0.0);
+
+                        if ids.is_empty() {
+                            ui.child_window("empty_library")
+                                .size([0.0, available_rows_height])
+                                .border(true)
+                                .build(|| {
+                                    ui.text_wrapped(
+                                        "Drag a directory/file or use File > Open Directory",
+                                    )
+                                });
+                        } else {
+                            let spacing = ui.clone_style().item_spacing[1];
+                            let row_height = ((available_rows_height
+                                - spacing * (ids.len() - 1) as f32)
+                                / ids.len() as f32)
+                                .max(1.0);
+
+                            for id in ids {
                                 let mut pending_scroll_direction =
-                                    app_state.take_pending_library_scroll_to_selection();
+                                    app_state.take_pending_library_scroll_to_selection(id);
                                 if force_scroll_to_selected {
                                     pending_scroll_direction = Some(0);
                                 }
-                                let items_per_row = calculate_library_items_per_row(ui, app_state);
-                                app_state.set_library_items_per_row(items_per_row);
+                                let items_per_row = calculate_library_items_per_row(
+                                    ui,
+                                    app_state.show_grid_view(),
+                                );
+                                app_state.set_library_items_per_row(id, items_per_row);
 
-                                // Custom selection/hover tints applied to every
-                                // selectable in the library list and grid.
-                                let _hover_token =
-                                    ui.push_style_color(StyleColor::HeaderHovered, LIBRARY_HOVER_COLOR);
-                                let _selected_token =
-                                    ui.push_style_color(StyleColor::Header, LIBRARY_SELECTED_COLOR);
-                                let _active_token =
-                                    ui.push_style_color(StyleColor::HeaderActive, LIBRARY_SELECTED_COLOR);
-
-                                if app_state.show_grid_view() {
-                                    if let Some(index) = render_library_grid(
-                                        ui,
-                                        app_state,
-                                        app_resources,
-                                        items_per_row,
-                                        &mut pending_scroll_direction,
-                                    ) {
-                                        clicked_index = Some(index);
-                                    }
-                                } else {
-                                    // render file list
-                                    for (index, entry) in app_state.media_items().iter().enumerate()
-                                    {
-                                        if render_library_item_row(
-                                            ui,
-                                            app_state,
-                                            app_resources,
-                                            index,
-                                            entry,
-                                        ) {
-                                            clicked_index = Some(index);
-                                        }
-                                        handle_scroll_to_selected(
-                                            ui,
-                                            app_state.current_index(),
-                                            index,
-                                            &mut pending_scroll_direction,
+                                let is_active = app_state.active_directory_id() == Some(id);
+                                let row_id = format!("directory_row_{:?}", id);
+                                ui.child_window(&row_id)
+                                    .size([0.0, row_height])
+                                    .border(true)
+                                    .build(|| {
+                                        let Some(session) = app_state.directory_session(id) else {
+                                            return;
+                                        };
+                                        let header_color = if is_active {
+                                            LIBRARY_SELECTED_COLOR
+                                        } else {
+                                            [1.0, 1.0, 1.0, 0.0]
+                                        };
+                                        let header = format!(
+                                            "{}  ({} items)##header_{:?}",
+                                            session.directory().display(),
+                                            session.media_items().len(),
+                                            id
                                         );
-                                    }
-                                }
-                            });
+                                        // Keep the close button outside the header hit area.
+                                        let close_width = ui.calc_text_size("X")[0]
+                                            + ui.clone_style().frame_padding[0] * 2.0;
+                                        let header_width = (ui.content_region_avail()[0]
+                                            - close_width
+                                            - ui.clone_style().item_spacing[0])
+                                            .max(1.0);
+                                        let _header_token =
+                                            ui.push_style_color(StyleColor::Header, header_color);
+                                        let header_clicked = ui
+                                            .selectable_config(&header)
+                                            .selected(is_active)
+                                            .size([header_width, 0.0])
+                                            .build();
+                                        if header_clicked {
+                                            activate_directory = Some(id);
+                                        }
+                                        ui.same_line();
+                                        if ui.small_button(format!("X##close_{:?}", id)) {
+                                            close_directory = Some(id);
+                                        }
+                                        drop(_header_token);
+
+                                        ui.separator();
+                                        let list_id = format!("directory_list_{:?}", id);
+                                        ui.child_window(&list_id).size([0.0, 0.0]).build(|| {
+                                            let _hover_token = ui.push_style_color(
+                                                StyleColor::HeaderHovered,
+                                                LIBRARY_HOVER_COLOR,
+                                            );
+                                            let _selected_token = ui.push_style_color(
+                                                StyleColor::Header,
+                                                LIBRARY_SELECTED_COLOR,
+                                            );
+                                            let _active_token = ui.push_style_color(
+                                                StyleColor::HeaderActive,
+                                                LIBRARY_SELECTED_COLOR,
+                                            );
+
+                                            if app_state.show_grid_view() {
+                                                if let Some(index) = render_library_grid(
+                                                    ui,
+                                                    session,
+                                                    app_state.show_thumbnail(),
+                                                    app_resources,
+                                                    items_per_row,
+                                                    &mut pending_scroll_direction,
+                                                ) {
+                                                    clicked_item = Some((id, index));
+                                                }
+                                            } else {
+                                                for (index, entry) in
+                                                    session.media_items().iter().enumerate()
+                                                {
+                                                    if render_library_item_row(
+                                                        ui,
+                                                        session,
+                                                        app_state.library_width(),
+                                                        app_state.show_thumbnail(),
+                                                        app_resources,
+                                                        index,
+                                                        entry,
+                                                    ) {
+                                                        clicked_item = Some((id, index));
+                                                    }
+                                                    handle_scroll_to_selected(
+                                                        ui,
+                                                        session.current_index(),
+                                                        index,
+                                                        &mut pending_scroll_direction,
+                                                    );
+                                                }
+                                            }
+                                            if ui.is_window_hovered()
+                                                && ui.is_mouse_clicked(MouseButton::Left)
+                                                && clicked_item.is_none()
+                                            {
+                                                activate_directory = Some(id);
+                                            }
+                                        });
+                                    });
+                            }
+                        }
                         if ui.button("Open Directory") {
                             app_state.open_directory_dialog();
                         }
@@ -308,13 +394,18 @@ pub fn render_ui(
     render_bookmark_window(ui, app_state);
     render_selection_window(ui, app_state);
 
-    if let Some(index) = clicked_index {
+    if let Some(id) = close_directory {
+        app_state.close_directory(id);
+    } else if let Some((id, index)) = clicked_item {
         // Plain click selects one; Shift+click toggles that single file.
+        app_state.activate_directory(id);
         if ui.io().key_shift {
             app_state.toggle_selection_at(index);
         } else {
             app_state.select_index(index);
         }
+    } else if let Some(id) = activate_directory {
+        app_state.activate_directory(id);
     }
 }
 
@@ -584,14 +675,16 @@ fn fit_scale_in_cell(img_w: u32, img_h: u32, cell: f32) -> (f32, f32) {
 
 fn render_library_item_row(
     ui: &Ui,
-    app_state: &ViewerState,
+    session: &DirectorySession,
+    library_width: f32,
+    show_thumbnail: bool,
     app_resources: &AppResources,
     index: usize,
     entry: &MediaEntry,
 ) -> bool {
-    let current_width = app_state.library_width() - 32.0;
+    let current_width = library_width - 32.0;
     let thumbnail_size_xy = [LIBRARY_THUMBNAIL_SIZE, LIBRARY_THUMBNAIL_SIZE];
-    if app_state.show_thumbnail() {
+    if show_thumbnail {
         let image_view_id = format!("thumbnail_image_view_{index}");
         let mut thumbnail_clicked = false;
         ui.child_window(&image_view_id)
@@ -621,28 +714,28 @@ fn render_library_item_row(
         let selectable_label = format!("{}##library_item_{index}", file_info);
         let text_clicked = ui
             .selectable_config(&selectable_label)
-            .selected(app_state.is_path_selected(&entry.path))
+            .selected(session.is_path_selected(&entry.path))
             .size([
                 (current_width - thumbnail_size_xy[0]) as f32,
                 thumbnail_size_xy[1],
             ])
             .build();
-        draw_cursor_outline_if_needed(ui, app_state, index);
+        draw_cursor_outline_if_needed(ui, session, index);
         return thumbnail_clicked || text_clicked;
     } else {
         let clicked = ui
             .selectable_config(&entry.file_name)
-            .selected(app_state.is_path_selected(&entry.path))
+            .selected(session.is_path_selected(&entry.path))
             .build();
-        draw_cursor_outline_if_needed(ui, app_state, index);
+        draw_cursor_outline_if_needed(ui, session, index);
         clicked
     }
 }
 
 /// While multiple files are selected, outline the row under the keyboard cursor
 /// so the user can see where Spacebar will collapse the selection.
-fn draw_cursor_outline_if_needed(ui: &Ui, app_state: &ViewerState, index: usize) {
-    if app_state.is_multi_select() && app_state.current_index() == Some(index) {
+fn draw_cursor_outline_if_needed(ui: &Ui, session: &DirectorySession, index: usize) {
+    if session.is_multi_select() && session.current_index() == Some(index) {
         ui.get_window_draw_list()
             .add_rect(
                 ui.item_rect_min(),
@@ -679,13 +772,13 @@ fn handle_scroll_to_selected(
 
 fn render_library_grid(
     ui: &Ui,
-    app_state: &ViewerState,
+    session: &DirectorySession,
+    show_thumbnail: bool,
     app_resources: &AppResources,
     cols: usize,
     pending_scroll_direction: &mut Option<i32>,
 ) -> Option<usize> {
     let cell = GRID_CELL_SIZE;
-    let show_thumbnail = app_state.show_thumbnail();
     // Cell height: thumbnail area + label row, or a thumbnail-sized text box when hidden.
     let label_h = ui.frame_height_with_spacing();
     let cell_h = if show_thumbnail {
@@ -694,7 +787,7 @@ fn render_library_grid(
         LIBRARY_THUMBNAIL_SIZE
     };
     let mut clicked: Option<usize> = None;
-    let current_index = app_state.current_index();
+    let current_index = session.current_index();
 
     let flags = TableFlags::NO_BORDERS_IN_BODY
         | TableFlags::NO_BORDERS_IN_BODY_UNTIL_RESIZE
@@ -708,14 +801,14 @@ fn render_library_grid(
         ui.table_setup_column(&format!("col_{i}"));
     }
 
-    for (index, entry) in app_state.media_items().iter().enumerate() {
+    for (index, entry) in session.media_items().iter().enumerate() {
         let col = index % cols;
         if col == 0 {
             ui.table_next_row();
         }
         ui.table_set_column_index(col);
 
-        let is_selected = app_state.is_path_selected(&entry.path);
+        let is_selected = session.is_path_selected(&entry.path);
         let selectable_id = format!("##grid_item_{index}");
 
         // Record top-left of this cell before drawing
@@ -731,7 +824,7 @@ fn render_library_grid(
         {
             clicked = Some(index);
         }
-        draw_cursor_outline_if_needed(ui, app_state, index);
+        draw_cursor_outline_if_needed(ui, session, index);
         handle_scroll_to_selected(ui, current_index, index, pending_scroll_direction);
         if ui.is_item_hovered() {
             let text = file_info_text(Some(entry));
@@ -769,8 +862,8 @@ fn render_library_grid(
     clicked
 }
 
-fn calculate_library_items_per_row(ui: &Ui, app_state: &ViewerState) -> usize {
-    if !app_state.show_grid_view() {
+fn calculate_library_items_per_row(ui: &Ui, show_grid_view: bool) -> usize {
+    if !show_grid_view {
         return 1;
     }
     // Use the current scroll area width to get real visible column count.

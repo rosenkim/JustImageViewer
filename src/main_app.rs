@@ -106,7 +106,7 @@ impl MainApp {
                 .open_path_argument(open_path)
                 .context("failed to open PATH argument")?;
         } else {
-            restore_last_directory_if_needed(&mut app_state);
+            app_state.restore_saved_directories();
         }
 
         // Validate FPS settings
@@ -319,6 +319,13 @@ impl MainApp {
             } else {
                 // No image selected (e.g. directory changed). Cancel any stale decode.
                 self.image_uploader.cancel_pending();
+                if let Some(texture_id) = self.app_state.current_texture().map(|texture| texture.id) {
+                    self.image_uploader.release_texture(
+                        &mut self.renderer,
+                        &mut self.imgui_textures,
+                        texture_id,
+                    );
+                }
                 self.app_state.set_current_texture(None);
             }
         }
@@ -911,22 +918,6 @@ fn save_config_on_exit(app_state: &ViewerState) {
     }
 }
 
-
-/// Try to restore the last open file from config.
-fn restore_last_directory_if_needed(app_state: &mut ViewerState) {
-    if let Some(file_path) = app_state.restore_candidate().map(PathBuf::from) {
-        if file_path.is_file() {
-            if let Some(parent) = file_path.parent().map(PathBuf::from) {
-                app_state.load_directory(parent, Some(file_path));
-            }
-        } else {
-            log::warn!(
-                "Configured last_open_file is not a file: {}",
-                file_path.display()
-            );
-        }
-    }
-}
 
 fn load_window_icon() -> Option<Icon> {
     // 런타임 파일로 로드해도 되고, 배포 편하게 include_bytes!로 박아도 됨.

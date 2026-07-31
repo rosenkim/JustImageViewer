@@ -24,6 +24,8 @@ pub struct AppConfig {
     pub restore_last_directory: bool,
     #[serde(alias = "last_open_folder", alias = "last_open_directory")]
     pub last_open_file: Option<PathBuf>,
+    pub open_directories: Vec<OpenDirectoryConfig>,
+    pub active_directory: Option<PathBuf>,
     pub ui_font_filename: String,
     #[serde(alias = "ui_font_size_pixels")]
     pub ui_font_size_pt: f32,
@@ -47,6 +49,13 @@ pub struct AppConfig {
     pub show_grid_view: bool,
 }
 
+/// A directory and its focused file saved for the next app launch.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct OpenDirectoryConfig {
+    pub path: PathBuf,
+    pub focused_file: Option<PathBuf>,
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum AppTheme {
@@ -66,6 +75,8 @@ impl Default for AppConfig {
         Self {
             restore_last_directory: true,
             last_open_file: None,
+            open_directories: Vec::new(),
+            active_directory: None,
             ui_font_filename: String::new(),
             // 10.5pt maps to about 14px at 96 DPI.
             ui_font_size_pt: DEFAULT_UI_FONT_SIZE_PT,
@@ -272,4 +283,42 @@ pub fn parse_hex_rgb(value: &str) -> Option<[f32; 3]> {
         f32::from(g) / 255.0,
         f32::from(b) / 255.0,
     ])
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn open_directories_round_trip_through_toml() {
+        let config = AppConfig {
+            open_directories: vec![
+                OpenDirectoryConfig {
+                    path: PathBuf::from("/pictures/one"),
+                    focused_file: Some(PathBuf::from("/pictures/one/a.png")),
+                },
+                OpenDirectoryConfig {
+                    path: PathBuf::from("/pictures/two"),
+                    focused_file: None,
+                },
+            ],
+            active_directory: Some(PathBuf::from("/pictures/two")),
+            ..AppConfig::default()
+        };
+
+        let serialized = toml::to_string_pretty(&config).expect("config should serialize");
+        let restored: AppConfig = toml::from_str(&serialized).expect("config should deserialize");
+
+        assert_eq!(restored.open_directories, config.open_directories);
+        assert_eq!(restored.active_directory, config.active_directory);
+    }
+
+    #[test]
+    fn old_config_defaults_to_no_open_directories() {
+        let restored: AppConfig = toml::from_str("restore_last_directory = true")
+            .expect("old config should deserialize");
+
+        assert!(restored.open_directories.is_empty());
+        assert!(restored.active_directory.is_none());
+    }
 }

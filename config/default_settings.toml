@@ -3,6 +3,8 @@
 
 restore_last_directory = true
 # last_open_file is managed by the app and stores the last selected file path.
+# open_directories is managed by the app and stores up to three Library rows.
+open_directories = []
 # slideshow_interval_secs = 5
 # Font file name under assets/fonts (leave empty for built-in ImGui font)
 ui_font_filename = ""
