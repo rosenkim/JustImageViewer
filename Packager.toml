@@ -1,7 +1,7 @@
 name = "justImageViewer"
 product-name = "JustImageViewer"
 identifier = "com.rosenkim.justImageViewer"
-version = "0.2.0"
+version = "0.3.0"
 out-dir = "./dist"
 binaries-dir = "./target/release"
 before-packaging-command = "cargo build --release"
