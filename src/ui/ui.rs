@@ -16,6 +16,13 @@ use super::layout_constants::{
 const LIBRARY_SORT_FIELDS: [&str; 3] = ["Name", "Date", "Size"];
 const LIBRARY_SORT_DIRECTIONS: [&str; 2] = ["Ascending", "Descending"];
 
+#[cfg(target_os = "macos")]
+const OPEN_IN_FILE_MANAGER_LABEL: &str = "Open In Finder";
+#[cfg(target_os = "windows")]
+const OPEN_IN_FILE_MANAGER_LABEL: &str = "Open In Explorer";
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
+const OPEN_IN_FILE_MANAGER_LABEL: &str = "Open In File Manager";
+
 // Square cell size for each thumbnail when several selected images are shown
 // side by side in the viewer panel.
 const MULTI_VIEW_CELL_SIZE: f32 = 160.0;
@@ -194,8 +201,8 @@ pub fn render_ui(
                                     }
                                 }
                             });
-                        if ui.button("Open Current Directory") {
-                            app_state.open_current_directory_in_file_manager();
+                        if ui.button("Open Directory") {
+                            app_state.open_directory_dialog();
                         }
                         ui.same_line();
                         if ui.button("Refresh") {
@@ -211,6 +218,10 @@ pub fn render_ui(
                         ui.same_line();
                         if ui.button("Bookmark") {
                             app_state.set_show_bookmark_window(true);
+                        }
+                        ui.same_line();
+                        if ui.button(OPEN_IN_FILE_MANAGER_LABEL) {
+                            app_state.open_current_directory_in_file_manager();
                         }
                     });
 
