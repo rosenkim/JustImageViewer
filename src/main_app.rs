@@ -791,11 +791,22 @@ fn setup_fonts(
             config: Some(FontConfig {
                 glyph_ranges: FontGlyphRanges::from_slice(&[
                     // Basic Latin + Latin Supplement
-                    0x0020, 0x00FF, // Korean (Hangul Syllables)
-                    0xAC00, 0xD7A3, // Korean (Hangul Jamo)
-                    0x1100, 0x11FF, // Korean (Hangul Compatibility Jamo)
-                    0x3130, 0x318F, // CJK Unified Ideographs (common Hanja)
-                    0x4E00, 0x9FFF, // Null terminator
+                    0x0020, 0x00FF,
+                    // Korean (Hangul Syllables)
+                    0xAC00, 0xD7A3,
+                    // Korean (Hangul Jamo)
+                    0x1100, 0x11FF,
+                    // Korean (Hangul Compatibility Jamo)
+                    0x3130, 0x318F,
+                    // CJK Unified Ideographs (common Hanja and Kanji)
+                    0x4E00, 0x9FFF,
+                    // Japanese punctuation, Hiragana, and Katakana
+                    0x3000, 0x30FF,
+                    // Katakana Phonetic Extensions
+                    0x31F0, 0x31FF,
+                    // Half-width Katakana and full-width forms
+                    0xFF00, 0xFFEF,
+                    // Null terminator
                     0,
                 ]),
                 ..FontConfig::default()
