@@ -11,7 +11,10 @@ use chrono::{SecondsFormat, Utc};
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    core::media::{self, MediaEntry, ThumbnailInfo},
+    core::{
+        helper::canonicalize_path,
+        media::{self, MediaEntry, ThumbnailInfo},
+    },
     infra::{
         bookmark::{BookmarkEntry, BookmarkStore, sort_bookmarks},
         config::{AppConfig, OpenDirectoryConfig},
@@ -1120,8 +1123,8 @@ impl ViewerState {
 
     /// Load images from a directory and choose which image to focus first.
     pub fn load_directory(&mut self, directory: PathBuf, focus_file: Option<PathBuf>) -> bool {
-        let directory = std::fs::canonicalize(&directory).unwrap_or(directory);
-        let focus_file = focus_file.map(|path| std::fs::canonicalize(&path).unwrap_or(path));
+        let directory = canonicalize_path(&directory);
+        let focus_file = focus_file.map(|path| canonicalize_path(&path));
         let directory_display = directory.display().to_string();
         if let Some(id) = self
             .directories
@@ -1182,6 +1185,7 @@ impl ViewerState {
     }
 
     fn load_single_file(&mut self, file_path: PathBuf) -> anyhow::Result<()> {
+        let file_path = canonicalize_path(&file_path);
         let directory = file_path
             .parent()
             .map(Path::to_path_buf)
@@ -1338,7 +1342,7 @@ impl ViewerState {
         }
 
         if let Some(active_path) = active {
-            let normalized = std::fs::canonicalize(&active_path).unwrap_or(active_path);
+            let normalized = canonicalize_path(&active_path);
             if let Some(id) = self
                 .directories
                 .iter()

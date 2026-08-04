@@ -1,5 +1,46 @@
+use std::path::{Path, PathBuf};
+
 use crate::math::Rect2D;
 use crate::render::image_uploader::UploadedTexture;
+
+/// Resolve a path to its absolute form without the Windows verbatim prefix.
+///
+/// `std::fs::canonicalize` returns extended-length paths on Windows
+/// (for example `\\?\C:\photos`). They work fine for file access, but the
+/// prefix leaks into the UI and into saved bookmarks, so we strip it here.
+/// If the path cannot be resolved, the original path is kept as-is.
+pub fn canonicalize_path(path: &Path) -> PathBuf {
+    match std::fs::canonicalize(path) {
+        Ok(resolved) => strip_verbatim_prefix(resolved),
+        Err(_) => path.to_path_buf(),
+    }
+}
+
+#[cfg(windows)]
+fn strip_verbatim_prefix(path: PathBuf) -> PathBuf {
+    let text = path.to_string_lossy();
+    // `\\?\UNC\server\share` is a network path and becomes `\\server\share`.
+    if let Some(rest) = text.strip_prefix(r"\\?\UNC\") {
+        return PathBuf::from(format!(r"\\{rest}"));
+    }
+    // `\\?\C:\dir` becomes `C:\dir`. Only plain drive paths are safe to strip.
+    if let Some(rest) = text.strip_prefix(r"\\?\") {
+        let mut chars = rest.chars();
+        let is_drive = matches!(
+            (chars.next(), chars.next(), chars.next()),
+            (Some(letter), Some(':'), Some('\\')) if letter.is_ascii_alphabetic()
+        );
+        if is_drive {
+            return PathBuf::from(rest);
+        }
+    }
+    path
+}
+
+#[cfg(not(windows))]
+fn strip_verbatim_prefix(path: PathBuf) -> PathBuf {
+    path
+}
 
 pub fn copy_region_to_clipboard(
     selection: Option<Rect2D>,

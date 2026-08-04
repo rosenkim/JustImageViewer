@@ -6,6 +6,8 @@ use std::{
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
+use crate::core::helper::canonicalize_path;
+
 const BOOKMARK_FILENAME: &str = "bookmarks.json";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -100,7 +102,7 @@ impl BookmarkStore {
 impl BookmarkEntry {
     pub fn new(path: PathBuf, bookmarked_at: String) -> Self {
         Self {
-            path,
+            path: canonicalize_path(&path),
             bookmarked_at,
         }
     }
