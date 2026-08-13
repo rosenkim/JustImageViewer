@@ -17,5 +17,7 @@ pub const DEFAULT_LIBRARY_WIDTH: f32 = 300.0;
 pub const DEFAULT_BACKGROUND_COLOR1: &str = "#CCCCCC";
 pub const DEFAULT_BACKGROUND_COLOR2: &str = "#FFFFFF";
 
-// Thumbnail size (in pixels).
-pub const THUMBNAIL_IMAGE_SIZE: u32 = 128;
+// Decoded thumbnail image size (in pixels).
+pub const DEFAULT_THUMBNAIL_IMAGE_SIZE: u32 = 128;
+// Thumbnail cell size drawn in the Library panel (in pixels).
+pub const DEFAULT_LIBRARY_THUMBNAIL_SIZE: f32 = 108.0;

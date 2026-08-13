@@ -23,6 +23,10 @@ image_view_mode = "fit_to_window"
 library_sort_field = "name"
 sort_direction = "ascending"
 show_thumbnail = true
+# Thumbnail cell size drawn in the Library panel, in pixels (32 - 512)
+library_thumbnail_size = 108.0
+# Decoded thumbnail image size kept in memory, in pixels (32 - 1024)
+thumbnail_image_size = 128
 # Maximum number of images kept in memory cache
 image_cache_count = 32
 # Rendering FPS while window is focused

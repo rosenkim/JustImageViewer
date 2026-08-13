@@ -964,16 +964,15 @@ impl ViewerState {
         }
 
         let tx = self.thumbnail_tx.clone();
+        // Decode size comes from settings.toml so users can tune thumbnail quality.
+        let thumbnail_size = self.config().thumbnail_image_size;
         let handle = tokio::task::spawn(async move {
             for path in paths {
                 // Decode off the async runtime because image codecs are blocking.
                 let result = tokio::task::spawn_blocking({
                     let path = path.clone();
                     move || {
-                        image_loader::load_thumbnail_rgba(
-                            &path,
-                            crate::constants::THUMBNAIL_IMAGE_SIZE,
-                        )
+                        image_loader::load_thumbnail_rgba(&path, thumbnail_size)
                     }
                 })
                 .await;

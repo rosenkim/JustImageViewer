@@ -12,8 +12,8 @@ use super::bookmark_window::render_bookmark_window;
 use super::helper::render_image_selection_widget;
 use super::keyboard_shortcuts_window::render_keyboard_shortcuts_window;
 use super::layout_constants::{
-    CHECKER_TILE_SIZE, GRID_CELL_SIZE, LIBRARY_THUMBNAIL_SIZE, MIN_LIBRARY_WIDTH,
-    MIN_SELECTION_SIZE, MIN_VIEWER_WIDTH, SPLITTER_WIDTH,
+    CHECKER_TILE_SIZE, MIN_LIBRARY_WIDTH, MIN_SELECTION_SIZE, MIN_VIEWER_WIDTH, SPLITTER_WIDTH,
+    grid_cell_size,
 };
 
 const LIBRARY_SORT_FIELDS: [&str; 3] = ["Name", "Date", "Size"];
@@ -167,6 +167,8 @@ pub fn render_ui(
                                 });
                         } else {
                             let spacing = ui.clone_style().item_spacing[1];
+                            // Library thumbnail size is user-configurable in settings.toml.
+                            let thumbnail_size = app_state.config().library_thumbnail_size;
                             let row_height = ((available_rows_height
                                 - spacing * (ids.len() - 1) as f32)
                                 / ids.len() as f32)
@@ -181,6 +183,7 @@ pub fn render_ui(
                                 let items_per_row = calculate_library_items_per_row(
                                     ui,
                                     app_state.show_grid_view(),
+                                    thumbnail_size,
                                 );
                                 app_state.set_library_items_per_row(id, items_per_row);
 
@@ -250,6 +253,7 @@ pub fn render_ui(
                                                     app_state.show_thumbnail(),
                                                     app_resources,
                                                     items_per_row,
+                                                    thumbnail_size,
                                                     &mut pending_scroll_direction,
                                                 ) {
                                                     clicked_item = Some((id, index));
@@ -266,6 +270,7 @@ pub fn render_ui(
                                                         app_resources,
                                                         index,
                                                         entry,
+                                                        thumbnail_size,
                                                     ) {
                                                         clicked_item = Some((id, index));
                                                     }
@@ -681,9 +686,10 @@ fn render_library_item_row(
     app_resources: &AppResources,
     index: usize,
     entry: &MediaEntry,
+    thumbnail_size: f32,
 ) -> bool {
     let current_width = library_width - 32.0;
-    let thumbnail_size_xy = [LIBRARY_THUMBNAIL_SIZE, LIBRARY_THUMBNAIL_SIZE];
+    let thumbnail_size_xy = [thumbnail_size, thumbnail_size];
     if show_thumbnail {
         let image_view_id = format!("thumbnail_image_view_{index}");
         let mut thumbnail_clicked = false;
@@ -691,7 +697,7 @@ fn render_library_item_row(
             .size(thumbnail_size_xy)
             .border(false)
             .build(|| {
-                let cell = LIBRARY_THUMBNAIL_SIZE;
+                let cell = thumbnail_size;
                 let (texture_id, uvs, img_w, img_h) = resolve_thumbnail(entry, app_resources);
                 let (draw_w, draw_h) = fit_scale_in_cell(img_w, img_h, cell);
                 let cursor = ui.cursor_pos();
@@ -776,15 +782,16 @@ fn render_library_grid(
     show_thumbnail: bool,
     app_resources: &AppResources,
     cols: usize,
+    thumbnail_size: f32,
     pending_scroll_direction: &mut Option<i32>,
 ) -> Option<usize> {
-    let cell = GRID_CELL_SIZE;
+    let cell = grid_cell_size(thumbnail_size);
     // Cell height: thumbnail area + label row, or a thumbnail-sized text box when hidden.
     let label_h = ui.frame_height_with_spacing();
     let cell_h = if show_thumbnail {
-        LIBRARY_THUMBNAIL_SIZE + label_h
+        thumbnail_size + label_h
     } else {
-        LIBRARY_THUMBNAIL_SIZE
+        thumbnail_size
     };
     let mut clicked: Option<usize> = None;
     let current_index = session.current_index();
@@ -834,9 +841,9 @@ fn render_library_grid(
         // Draw thumbnail image or placeholder on top via draw_list
         if show_thumbnail {
             let (texture_id, uvs, img_w, img_h) = resolve_thumbnail(entry, app_resources);
-            let (draw_w, draw_h) = fit_scale_in_cell(img_w, img_h, LIBRARY_THUMBNAIL_SIZE);
+            let (draw_w, draw_h) = fit_scale_in_cell(img_w, img_h, thumbnail_size);
             let img_x = cell_origin[0] + ((cell - draw_w) * 0.5).max(0.0);
-            let img_y = cell_origin[1] + ((LIBRARY_THUMBNAIL_SIZE - draw_h) * 0.5).max(0.0);
+            let img_y = cell_origin[1] + ((thumbnail_size - draw_h) * 0.5).max(0.0);
             ui.get_window_draw_list()
                 .add_image(texture_id, [img_x, img_y], [img_x + draw_w, img_y + draw_h])
                 .uv_min([uvs[0], uvs[1]])
@@ -845,7 +852,7 @@ fn render_library_grid(
         }
 
         // Draw file name label below the thumbnail (or at top if no thumbnail)
-        let label_y_offset = if show_thumbnail { LIBRARY_THUMBNAIL_SIZE } else { 0.0 };
+        let label_y_offset = if show_thumbnail { thumbnail_size } else { 0.0 };
         let label_pos = [cursor_pos[0] + 2.0, cursor_pos[1] + label_y_offset + 2.0];
         ui.set_cursor_pos(label_pos);
         let label_w = cell - 4.0;
@@ -853,7 +860,7 @@ fn render_library_grid(
             1
         } else {
             let line_h = ui.frame_height_with_spacing().max(1.0);
-            ((LIBRARY_THUMBNAIL_SIZE - 4.0) / line_h).floor().max(1.0) as usize
+            ((thumbnail_size - 4.0) / line_h).floor().max(1.0) as usize
         };
         let display_name = wrap_text_to_width_and_lines(ui, &entry.file_name, label_w, max_lines);
         ui.text(&display_name);
@@ -862,13 +869,14 @@ fn render_library_grid(
     clicked
 }
 
-fn calculate_library_items_per_row(ui: &Ui, show_grid_view: bool) -> usize {
+fn calculate_library_items_per_row(ui: &Ui, show_grid_view: bool, thumbnail_size: f32) -> usize {
     if !show_grid_view {
         return 1;
     }
     // Use the current scroll area width to get real visible column count.
-    let available_width = ui.content_region_avail()[0].max(GRID_CELL_SIZE);
-    ((available_width / GRID_CELL_SIZE).floor() as usize).max(1)
+    let cell = grid_cell_size(thumbnail_size);
+    let available_width = ui.content_region_avail()[0].max(cell);
+    ((available_width / cell).floor() as usize).max(1)
 }
 
 /// Wrap `text` to fit within `max_width` pixels and `max_lines` lines.

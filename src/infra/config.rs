@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 use crate::app::{ImageViewMode, LibrarySortField, SortDirection};
 use crate::constants::{DEFAULT_BACKGROUND_COLOR1, DEFAULT_BACKGROUND_COLOR2, LOGICAL_DPI, POINTS_PER_INCH};
 use crate::constants::{DEFAULT_FOCUSED_FPS, DEFAULT_UNFOCUSED_FPS, DEFAULT_IMAGE_CACHE_COUNT, DEFAULT_UI_FONT_SIZE_PT, DEFAULT_UI_SCALE_FACTOR, DEFAULT_LIBRARY_WIDTH};
+use crate::constants::{DEFAULT_LIBRARY_THUMBNAIL_SIZE, DEFAULT_THUMBNAIL_IMAGE_SIZE};
 
 const QUALIFIER: &str = "com";
 const ORGANIZATION: &str = "rosenkim";
@@ -47,6 +48,10 @@ pub struct AppConfig {
     pub sort_direction: SortDirection,
     pub show_thumbnail: bool,
     pub show_grid_view: bool,
+    /// Thumbnail cell size drawn in the Library panel (pixels).
+    pub library_thumbnail_size: f32,
+    /// Decoded thumbnail image size kept in memory (pixels).
+    pub thumbnail_image_size: u32,
 }
 
 /// A directory and its focused file saved for the next app launch.
@@ -96,6 +101,8 @@ impl Default for AppConfig {
             sort_direction: SortDirection::Ascending,
             show_thumbnail: true,
             show_grid_view: false,
+            library_thumbnail_size: DEFAULT_LIBRARY_THUMBNAIL_SIZE,
+            thumbnail_image_size: DEFAULT_THUMBNAIL_IMAGE_SIZE,
         }
     }
 }
@@ -200,6 +207,7 @@ pub fn load_or_create(reset_config: bool) -> Result<ConfigHandle> {
     }
 
     normalize_background_style(&mut settings.background_style);
+    normalize_thumbnail_sizes(&mut settings);
 
     Ok(ConfigHandle {
         settings,
@@ -248,6 +256,42 @@ fn toml_number_to_f32(value: &toml::Value) -> Option<f32> {
     value.as_integer().map(|v| v as f32)
 }
 
+
+/// Keep thumbnail sizes inside a usable range so the Library stays readable.
+fn normalize_thumbnail_sizes(settings: &mut AppConfig) {
+    const MIN_LIBRARY_THUMBNAIL_SIZE: f32 = 32.0;
+    const MAX_LIBRARY_THUMBNAIL_SIZE: f32 = 512.0;
+    const MIN_THUMBNAIL_IMAGE_SIZE: u32 = 32;
+    const MAX_THUMBNAIL_IMAGE_SIZE: u32 = 1024;
+
+    let library_size = if settings.library_thumbnail_size.is_finite() {
+        settings
+            .library_thumbnail_size
+            .clamp(MIN_LIBRARY_THUMBNAIL_SIZE, MAX_LIBRARY_THUMBNAIL_SIZE)
+    } else {
+        DEFAULT_LIBRARY_THUMBNAIL_SIZE
+    };
+    if library_size != settings.library_thumbnail_size {
+        log::warn!(
+            "library_thumbnail_size {} is out of range. Using {}",
+            settings.library_thumbnail_size,
+            library_size
+        );
+        settings.library_thumbnail_size = library_size;
+    }
+
+    let image_size = settings
+        .thumbnail_image_size
+        .clamp(MIN_THUMBNAIL_IMAGE_SIZE, MAX_THUMBNAIL_IMAGE_SIZE);
+    if image_size != settings.thumbnail_image_size {
+        log::warn!(
+            "thumbnail_image_size {} is out of range. Using {}",
+            settings.thumbnail_image_size,
+            image_size
+        );
+        settings.thumbnail_image_size = image_size;
+    }
+}
 
 fn normalize_background_style(style: &mut BackgroundStyle) {
     if parse_hex_rgb(&style.color1).is_none() {

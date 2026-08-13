@@ -4,8 +4,14 @@ pub const MIN_LIBRARY_WIDTH: f32 = 220.0;
 pub const MIN_VIEWER_WIDTH: f32 = 280.0;
 
 // Library thumbnail grid.
-pub const LIBRARY_THUMBNAIL_SIZE: f32 = 96.0;
-pub const GRID_CELL_SIZE: f32 = LIBRARY_THUMBNAIL_SIZE + 16.0;
+// The thumbnail size itself comes from settings.toml (`library_thumbnail_size`).
+// Extra space around a thumbnail inside one grid cell.
+pub const GRID_CELL_PADDING: f32 = 16.0;
+
+/// Grid cell size for the given thumbnail size.
+pub fn grid_cell_size(thumbnail_size: f32) -> f32 {
+    thumbnail_size + GRID_CELL_PADDING
+}
 
 // Checker background tile size (pixels).
 pub const CHECKER_TILE_SIZE: f32 = 64.0;
