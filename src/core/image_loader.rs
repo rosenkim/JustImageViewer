@@ -45,10 +45,15 @@ pub fn load_thumbnail_rgba(path: &Path, max_size: u32) -> Result<DecodedImage> {
         .decode()
         .with_context(|| format!("failed to decode image {}", path.display()))?;
 
-    // Keep the original ratio so the list item does not look stretched.
-    let thumbnail = dyn_image
-        .thumbnail(max_size.max(1), max_size.max(1))
-        .to_rgba8();
+    let box_size = max_size.max(1);
+    // Only shrink. `thumbnail()` would also enlarge a small image, so skip it here.
+    let thumbnail = if dyn_image.width() > box_size || dyn_image.height() > box_size {
+        // Keep the original ratio so the list item does not look stretched.
+        dyn_image.thumbnail(box_size, box_size).to_rgba8()
+    } else {
+        dyn_image.to_rgba8()
+    };
+    let thumbnail = pad_to_box(thumbnail, box_size);
     let (width, height) = thumbnail.dimensions();
     let pixels = Arc::<[u8]>::from(thumbnail.into_raw());
 
@@ -57,6 +62,22 @@ pub fn load_thumbnail_rgba(path: &Path, max_size: u32) -> Result<DecodedImage> {
         height: height as usize,
         pixels,
     })
+}
+
+/// Put a small image in the middle of a transparent square box.
+/// Images that already fill the box are returned unchanged (no upscaling).
+fn pad_to_box(image: image::RgbaImage, box_size: u32) -> image::RgbaImage {
+    let (width, height) = image.dimensions();
+    if width >= box_size || height >= box_size {
+        return image;
+    }
+
+    // Transparent background, so only the original pixels are visible.
+    let mut canvas = image::RgbaImage::from_pixel(box_size, box_size, image::Rgba([0, 0, 0, 0]));
+    let offset_x = (box_size.saturating_sub(width)) / 2;
+    let offset_y = (box_size.saturating_sub(height)) / 2;
+    image::imageops::replace(&mut canvas, &image, offset_x as i64, offset_y as i64);
+    canvas
 }
 
 fn detect_format(path: &Path) -> Option<MediaFormat> {
