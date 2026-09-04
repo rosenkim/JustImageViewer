@@ -480,6 +480,24 @@ fn render_main_menu_bar(ui: &imgui::Ui, app_state: &mut ViewerState, running: &m
             if ui.menu_item("Open Directory...") {
                 app_state.open_directory_dialog();
             }
+            ui.menu("Recent Directories", || {
+                let mut selected = None;
+                let config = app_state.config();
+                if app_state.recent_directories().is_empty() || config.recent_directory_count == 0 {
+                    ui.menu_item_config("No recent directories").enabled(false).build();
+                }
+                for (index, path) in app_state.recent_directories().iter()
+                    .take(config.recent_directory_count).enumerate()
+                {
+                    let _id = ui.push_id_usize(index);
+                    if ui.menu_item(path.to_string_lossy()) {
+                        selected = Some(path.clone());
+                    }
+                }
+                if let Some(path) = selected {
+                    app_state.load_directory(path, None);
+                }
+            });
             if ui.menu_item("Quit") {
                 *running = false;
             }

@@ -27,6 +27,7 @@ pub struct AppConfig {
     pub last_open_file: Option<PathBuf>,
     pub open_directories: Vec<OpenDirectoryConfig>,
     pub active_directory: Option<PathBuf>,
+    pub recent_directory_count: usize,
     pub ui_font_filename: String,
     #[serde(alias = "ui_font_size_pixels")]
     pub ui_font_size_pt: f32,
@@ -82,6 +83,7 @@ impl Default for AppConfig {
             last_open_file: None,
             open_directories: Vec::new(),
             active_directory: None,
+            recent_directory_count: 5,
             ui_font_filename: String::new(),
             // 10.5pt maps to about 14px at 96 DPI.
             ui_font_size_pt: DEFAULT_UI_FONT_SIZE_PT,
@@ -332,6 +334,13 @@ pub fn parse_hex_rgb(value: &str) -> Option<[f32; 3]> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn recent_directory_count_defaults_without_history_in_config() {
+        let config: AppConfig = toml::from_str("").unwrap();
+        assert_eq!(config.recent_directory_count, 5);
+        assert!(!toml::to_string(&config).unwrap().contains("recent_directories"));
+    }
 
     #[test]
     fn open_directories_round_trip_through_toml() {

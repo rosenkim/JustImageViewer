@@ -184,6 +184,8 @@ pub struct ViewerState {
     image_selection_drag_start: Option<[f32; 2]>,
     image_selection_drag_mode: Option<ImageSelectionDragMode>,
     bookmarks: Vec<BookmarkEntry>,
+    recent_directories: Vec<PathBuf>,
+    restoring_directories: bool,
     bookmarks_dirty: bool,
     pending_delete_bookmark_path: Option<PathBuf>,
 
@@ -207,6 +209,10 @@ impl ViewerState {
     /// Create app state with config and default UI state.
     pub fn new(config_path: PathBuf, mut config: AppConfig) -> Self {
         let bookmark_store = BookmarkStore::new(&config_path);
+        let recent_directories = bookmark_store.load_recent_directories().unwrap_or_else(|err| {
+            log::error!("Failed to load recent directories: {err:#}");
+            Vec::new()
+        });
         let status_message = format!("Ready - configuration at {}", config_path.display());
         let show_library = config.show_library;
         let show_info = config.show_info;
@@ -264,6 +270,8 @@ impl ViewerState {
             image_selection_drag_start: None,
             image_selection_drag_mode: None,
             bookmarks,
+            recent_directories,
+            restoring_directories: false,
             bookmarks_dirty: false,
             pending_delete_bookmark_path: None,
 
@@ -373,6 +381,22 @@ impl ViewerState {
 
     pub fn current_entry(&self) -> Option<&MediaEntry> {
         self.active_session().and_then(DirectorySession::current_entry)
+    }
+
+    pub fn recent_directories(&self) -> &[PathBuf] {
+        &self.recent_directories
+    }
+
+    fn record_recent_directory(&mut self, directory: PathBuf) {
+        if self.restoring_directories {
+            return;
+        }
+        self.recent_directories.retain(|path| path != &directory);
+        self.recent_directories.insert(0, directory);
+        self.recent_directories.truncate(self.config.recent_directory_count);
+        if let Err(err) = self.bookmark_store.save_recent_directories(&self.recent_directories) {
+            log::error!("Failed to save recent directories: {err:#}");
+        }
     }
 
     pub fn bookmarks(&self) -> &[BookmarkEntry] {
@@ -1143,6 +1167,7 @@ impl ViewerState {
                 self.select_index(index);
             }
             self.status_message = format!("Focused open directory: {}", directory_display);
+            self.record_recent_directory(directory);
             return true;
         }
 
@@ -1157,6 +1182,7 @@ impl ViewerState {
 
         self.evict_oldest_if_full();
 
+        self.record_recent_directory(directory.clone());
         let id = DirectoryId(self.next_directory_id);
         self.next_directory_id += 1;
         let total = entries.len();
@@ -1314,6 +1340,13 @@ impl ViewerState {
 
     /// Restore all saved directory rows. Old settings fall back to last_open_file.
     pub fn restore_saved_directories(&mut self) {
+        // Restoring Library rows should not change the user's recent order.
+        self.restoring_directories = true;
+        self.restore_directory_sessions();
+        self.restoring_directories = false;
+    }
+
+    fn restore_directory_sessions(&mut self) {
         if !self.config.restore_last_directory {
             return;
         }
