@@ -3,4 +3,4 @@ Cross-platform
 - Windows and Mac
 - Linux(best-effort)
 SOLID principles
-comments in Easy English
+all comments in Easy English
