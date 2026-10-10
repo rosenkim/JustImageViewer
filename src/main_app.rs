@@ -33,6 +33,7 @@ use crate::render::image_uploader::ImageUploader;
 use crate::render::imgui_textures::ImguiTextures;
 use crate::render::texture_atlas_manager::TextureAtlasManager;
 use crate::ui::render_ui;
+use crate::ui::view_panel::ViewPanel;
 
 struct WebServerState {
     shutdown_token: CancellationToken,
@@ -42,6 +43,7 @@ struct WebServerState {
 
 pub struct MainApp {
     app_state: ViewerState,
+    view_panel: ViewPanel,
     webserver_state: Option<WebServerState>,
 
     window: Arc<Window>,
@@ -236,6 +238,7 @@ impl MainApp {
 
         Ok(Self {
             app_state,
+            view_panel: ViewPanel::new(),
             webserver_state,
             window,
             _instance: instance,
@@ -590,6 +593,7 @@ impl MainApp {
         render_ui(
             ui,
             &mut self.app_state,
+            &mut self.view_panel,
             self.image_uploader.is_pending(),
             &self.app_resources,
             &mut running,

@@ -1,10 +1,10 @@
+use super::layout_constants::{
+    MIN_SELECTION_SIZE, SELECTION_DASH_LENGTH, SELECTION_GAP_LENGTH, SELECTION_LINE_THICKNESS,
+    SELECTION_RESIZE_HIT_PADDING,
+};
 use crate::app::{ImageSelectionDragMode, ImageSelectionResizeHandle, ViewerState};
 use crate::math::{Point2D, Rect2D};
 use imgui::{ImColor32, Key, MouseButton, MouseCursor, Ui};
-use super::layout_constants::{
-    MIN_SELECTION_SIZE, SELECTION_DASH_LENGTH, SELECTION_GAP_LENGTH,
-    SELECTION_LINE_THICKNESS, SELECTION_RESIZE_HIT_PADDING,
-};
 
 const SELECTION_POPUP_ID: &str = "image_selection_popup";
 
@@ -12,222 +12,227 @@ struct SelectionPopupItem {
     name: &'static str,
 }
 
-const SELECTION_POPUP_ITEMS: &[SelectionPopupItem] = &[
-    SelectionPopupItem { name: "Copy" },
-];
+const SELECTION_POPUP_ITEMS: &[SelectionPopupItem] = &[SelectionPopupItem { name: "Copy" }];
 
-pub fn render_image_selection_widget(
-    ui: &Ui,
-    app_state: &mut ViewerState,
-    is_pending: bool,
-    view_panel_min: [f32; 2],
-    view_panel_max: [f32; 2],
-    image_screen_min: [f32; 2],
-    image_display_size: [f32; 2],
-    image_pixel_size: [f32; 2],
-) {
-    // Escape key clears any selection/drag state
-    if ui.is_key_pressed(Key::Escape) {
-        app_state.clear_image_selection_state();
-        return;
-    }
+pub struct ImageMouseHandler;
 
-    // If image metrics are invalid, bail out early
-    if image_display_size[0] <= 0.0
-        || image_display_size[1] <= 0.0
-        || image_pixel_size[0] <= 0.0
-        || image_pixel_size[1] <= 0.0
-    {
-        app_state.clear_image_selection_drag();
-        return;
-    }
-
-    // is_window_hovered() returns false when another ImGui window is on top,
-    // so this prevents input from reaching the image when it is obscured.
-    let is_hovering_view_panel = ui.is_mouse_hovering_rect(view_panel_min, view_panel_max)
-        && ui.is_window_hovered();
-    let mouse_pos: Point2D = Point2D::from_array(ui.io().mouse_pos);
-
-    let active_drag_mode = app_state.image_selection_drag_mode();
-    if let Some(mode) = active_drag_mode {
-        match mode {
-            ImageSelectionDragMode::Resize { handle, .. } => {
-                ui.set_mouse_cursor(Some(cursor_for_resize_handle(handle)));
-            }
-            ImageSelectionDragMode::Move { .. } => {
-                ui.set_mouse_cursor(Some(MouseCursor::ResizeAll));
-            }
-            ImageSelectionDragMode::Create => {}
+impl ImageMouseHandler {
+    pub fn handle(
+        &mut self,
+        ui: &Ui,
+        app_state: &mut ViewerState,
+        is_pending: bool,
+        view_panel_min: [f32; 2],
+        view_panel_max: [f32; 2],
+        image_screen_min: [f32; 2],
+        image_display_size: [f32; 2],
+        image_pixel_size: [f32; 2],
+    ) {
+        // Escape key clears any selection/drag state
+        if ui.is_key_pressed(Key::Escape) {
+            app_state.clear_image_selection_state();
+            return;
         }
-    } else if is_hovering_view_panel {
-        if let Some(selection) = app_state.image_selection() {
-            if let Some(handle) = resolve_resize_handle(
-                mouse_pos,
-                selection,
-                image_screen_min,
-                image_display_size,
-                image_pixel_size,
-            ) {
-                ui.set_mouse_cursor(Some(cursor_for_resize_handle(handle)));
-            } else {
-                let mouse_image = screen_to_image(
-                    mouse_pos,
-                    image_screen_min,
-                    image_display_size,
-                    image_pixel_size,
-                );
-                if selection.contain_point(mouse_image) {
+
+        // If image metrics are invalid, bail out early
+        if image_display_size[0] <= 0.0
+            || image_display_size[1] <= 0.0
+            || image_pixel_size[0] <= 0.0
+            || image_pixel_size[1] <= 0.0
+        {
+            app_state.clear_image_selection_drag();
+            return;
+        }
+
+        // is_window_hovered() returns false when another ImGui window is on top,
+        // so this prevents input from reaching the image when it is obscured.
+        let is_hovering_view_panel =
+            ui.is_mouse_hovering_rect(view_panel_min, view_panel_max) && ui.is_window_hovered();
+        let mouse_pos: Point2D = Point2D::from_array(ui.io().mouse_pos);
+
+        let active_drag_mode = app_state.image_selection_drag_mode();
+        if let Some(mode) = active_drag_mode {
+            match mode {
+                ImageSelectionDragMode::Resize { handle, .. } => {
+                    ui.set_mouse_cursor(Some(cursor_for_resize_handle(handle)));
+                }
+                ImageSelectionDragMode::Move { .. } => {
                     ui.set_mouse_cursor(Some(MouseCursor::ResizeAll));
                 }
+                ImageSelectionDragMode::Create => {}
             }
-        }
-    }
-
-    if is_hovering_view_panel && ui.is_mouse_clicked(MouseButton::Left) {
-        let mouse_image = screen_to_image(
-            mouse_pos,
-            image_screen_min,
-            image_display_size,
-            image_pixel_size,
-        )
-        .to_array();
-
-        // Decide whether to resize, move, or create a selection.
-        let drag_mode = app_state
-            .image_selection()
-            .and_then(|selection| {
-                resolve_resize_handle(
+        } else if is_hovering_view_panel {
+            if let Some(selection) = app_state.image_selection() {
+                if let Some(handle) = resolve_resize_handle(
                     mouse_pos,
                     selection,
                     image_screen_min,
                     image_display_size,
                     image_pixel_size,
-                )
-                .map(|handle| ImageSelectionDragMode::Resize {
-                    handle,
-                    original: selection,
-                })
-                .or_else(|| {
-                    let mouse_image = Point2D::from_array(mouse_image);
+                ) {
+                    ui.set_mouse_cursor(Some(cursor_for_resize_handle(handle)));
+                } else {
+                    let mouse_image = screen_to_image(
+                        mouse_pos,
+                        image_screen_min,
+                        image_display_size,
+                        image_pixel_size,
+                    );
                     if selection.contain_point(mouse_image) {
-                        Some(ImageSelectionDragMode::Move { original: selection })
-                    } else {
-                        None
+                        ui.set_mouse_cursor(Some(MouseCursor::ResizeAll));
                     }
-                })
-            })
-            .unwrap_or(ImageSelectionDragMode::Create);
-
-        app_state.begin_image_selection_drag(mouse_image, drag_mode);
-    }
-
-    if let Some(saved_selection) = app_state.image_selection() {
-        draw_dashed_selection(
-            ui,
-            image_display_size,
-            image_pixel_size,
-            image_screen_min,
-            saved_selection,
-            ImColor32::from_rgba(80, 180, 255, 240),
-        );
-    }
-
-    let mut popup_screen_pos_override: Option<[f32; 2]> = None;
-
-    // Handle drag preview and finalize selection
-    if let (Some(start), Some(drag_mode)) = (
-        app_state.image_selection_drag_start(),
-        app_state.image_selection_drag_mode(),
-    ) {
-        // Get current mouse position in image space
-        let current = screen_to_image(
-            Point2D::from_array(ui.io().mouse_pos),
-            image_screen_min,
-            image_display_size,
-            image_pixel_size,
-        );
-
-        // Live preview rect based on drag mode
-        let preview = match drag_mode {
-            ImageSelectionDragMode::Create => {
-                // Create a new selection from start to current mouse position
-                Rect2D::from_points(Point2D::from_array(start), current)
+                }
             }
-            ImageSelectionDragMode::Move { original } => move_selection(
-                original,
-                Point2D::from_array(start),
-                current,
+        }
+
+        if is_hovering_view_panel && ui.is_mouse_clicked(MouseButton::Left) {
+            let mouse_image = screen_to_image(
+                mouse_pos,
+                image_screen_min,
+                image_display_size,
                 image_pixel_size,
-            ),
-            ImageSelectionDragMode::Resize { handle, original } => {
-                // Resize existing selection based on handle and mouse movement
-                resize_selection(
-                    original,
-                    handle,
-                    Point2D::from_array(start),
-                    current,
-                    image_pixel_size,
-                )
-            }
-        };
+            )
+            .to_array();
 
-        if ui.is_mouse_down(MouseButton::Left) {
+            // Decide whether to resize, move, or create a selection.
+            let drag_mode = app_state
+                .image_selection()
+                .and_then(|selection| {
+                    resolve_resize_handle(
+                        mouse_pos,
+                        selection,
+                        image_screen_min,
+                        image_display_size,
+                        image_pixel_size,
+                    )
+                    .map(|handle| ImageSelectionDragMode::Resize {
+                        handle,
+                        original: selection,
+                    })
+                    .or_else(|| {
+                        let mouse_image = Point2D::from_array(mouse_image);
+                        if selection.contain_point(mouse_image) {
+                            Some(ImageSelectionDragMode::Move {
+                                original: selection,
+                            })
+                        } else {
+                            None
+                        }
+                    })
+                })
+                .unwrap_or(ImageSelectionDragMode::Create);
+
+            app_state.begin_image_selection_drag(mouse_image, drag_mode);
+        }
+
+        if let Some(saved_selection) = app_state.image_selection() {
             draw_dashed_selection(
                 ui,
                 image_display_size,
                 image_pixel_size,
                 image_screen_min,
-                preview,
-                ImColor32::from_rgba(255, 210, 90, 255),
+                saved_selection,
+                ImColor32::from_rgba(80, 180, 255, 240),
             );
         }
 
-        if ui.is_mouse_released(MouseButton::Left) {
-            if preview.width() >= MIN_SELECTION_SIZE && preview.height() >= MIN_SELECTION_SIZE {
-                app_state.set_image_selection(Some(preview));
-                if matches!(drag_mode, ImageSelectionDragMode::Create) {
-                    ui.open_popup(SELECTION_POPUP_ID);
-                    popup_screen_pos_override = Some(
-                        image_to_screen(
-                            preview.max,
-                            image_screen_min,
-                            image_display_size,
-                            image_pixel_size,
-                        )
-                        .to_array(),
-                    );
+        let mut popup_screen_pos_override: Option<[f32; 2]> = None;
+
+        // Handle drag preview and finalize selection
+        if let (Some(start), Some(drag_mode)) = (
+            app_state.image_selection_drag_start(),
+            app_state.image_selection_drag_mode(),
+        ) {
+            // Get current mouse position in image space
+            let current = screen_to_image(
+                Point2D::from_array(ui.io().mouse_pos),
+                image_screen_min,
+                image_display_size,
+                image_pixel_size,
+            );
+
+            // Live preview rect based on drag mode
+            let preview = match drag_mode {
+                ImageSelectionDragMode::Create => {
+                    // Create a new selection from start to current mouse position
+                    Rect2D::from_points(Point2D::from_array(start), current)
+                }
+                ImageSelectionDragMode::Move { original } => move_selection(
+                    original,
+                    Point2D::from_array(start),
+                    current,
+                    image_pixel_size,
+                ),
+                ImageSelectionDragMode::Resize { handle, original } => {
+                    // Resize existing selection based on handle and mouse movement
+                    resize_selection(
+                        original,
+                        handle,
+                        Point2D::from_array(start),
+                        current,
+                        image_pixel_size,
+                    )
+                }
+            };
+
+            if ui.is_mouse_down(MouseButton::Left) {
+                draw_dashed_selection(
+                    ui,
+                    image_display_size,
+                    image_pixel_size,
+                    image_screen_min,
+                    preview,
+                    ImColor32::from_rgba(255, 210, 90, 255),
+                );
+            }
+
+            if ui.is_mouse_released(MouseButton::Left) {
+                if preview.width() >= MIN_SELECTION_SIZE && preview.height() >= MIN_SELECTION_SIZE {
+                    app_state.set_image_selection(Some(preview));
+                    if matches!(drag_mode, ImageSelectionDragMode::Create) {
+                        ui.open_popup(SELECTION_POPUP_ID);
+                        popup_screen_pos_override = Some(
+                            image_to_screen(
+                                preview.max,
+                                image_screen_min,
+                                image_display_size,
+                                image_pixel_size,
+                            )
+                            .to_array(),
+                        );
+                    }
+                }
+                app_state.clear_image_selection_drag();
+                if let Some(selection) = app_state.image_selection() {
+                    app_state.set_image_selection(Some(floor_selection(selection)));
                 }
             }
-            app_state.clear_image_selection_drag();
-            if let Some(selection) = app_state.image_selection() {
-                app_state.set_image_selection(Some(floor_selection(selection)));
+        }
+
+        if is_hovering_view_panel
+            && ui.is_mouse_clicked(MouseButton::Right)
+            && app_state.image_selection_drag_start().is_none()
+        {
+            ui.open_popup(SELECTION_POPUP_ID);
+            popup_screen_pos_override = Some(mouse_pos.to_array());
+        }
+
+        if let Some(popup_screen_pos) = popup_screen_pos_override {
+            // imgui-rs doesn't provide a builder for setting popup position, so we use FFI directly
+            unsafe {
+                imgui::sys::igSetNextWindowPos(
+                    imgui::sys::ImVec2 {
+                        x: popup_screen_pos[0],
+                        y: popup_screen_pos[1],
+                    },
+                    imgui::sys::ImGuiCond_Always as i32,
+                    imgui::sys::ImVec2 { x: 0.0, y: 0.0 },
+                );
             }
         }
-    }
 
-    if is_hovering_view_panel
-        && ui.is_mouse_clicked(MouseButton::Right)
-        && app_state.image_selection_drag_start().is_none()
-    {
-        ui.open_popup(SELECTION_POPUP_ID);
-        popup_screen_pos_override = Some(mouse_pos.to_array());
+        render_selection_popup(ui, app_state, is_pending);
     }
-
-    if let Some(popup_screen_pos) = popup_screen_pos_override {
-        // imgui-rs doesn't provide a builder for setting popup position, so we use FFI directly
-        unsafe {
-            imgui::sys::igSetNextWindowPos(
-                imgui::sys::ImVec2 {
-                    x: popup_screen_pos[0],
-                    y: popup_screen_pos[1],
-                },
-                imgui::sys::ImGuiCond_Always as i32,
-                imgui::sys::ImVec2 { x: 0.0, y: 0.0 },
-            );
-        }
-    }
-
-    render_selection_popup(ui, app_state, is_pending);
 }
 
 fn draw_dashed_selection(
@@ -271,8 +276,18 @@ fn resolve_resize_handle(
     image_pixel_size: [f32; 2],
 ) -> Option<ImageSelectionResizeHandle> {
     // Hit-test entirely in screen space to avoid scale-dependent issues
-    let sel_screen_min = image_to_screen(selection.min, image_screen_min, image_display_size, image_pixel_size);
-    let sel_screen_max = image_to_screen(selection.max, image_screen_min, image_display_size, image_pixel_size);
+    let sel_screen_min = image_to_screen(
+        selection.min,
+        image_screen_min,
+        image_display_size,
+        image_pixel_size,
+    );
+    let sel_screen_max = image_to_screen(
+        selection.max,
+        image_screen_min,
+        image_display_size,
+        image_pixel_size,
+    );
     let padding = SELECTION_RESIZE_HIT_PADDING;
 
     let near_left = (mouse_screen.x - sel_screen_min.x).abs() <= padding;
@@ -472,20 +487,12 @@ fn image_to_screen(
     }
 }
 
-fn render_selection_popup(
-    ui: &Ui,
-    app_state: &mut ViewerState,
-    is_pending: bool,
-) {
+fn render_selection_popup(ui: &Ui, app_state: &mut ViewerState, is_pending: bool) {
     if let Some(_popup) = ui.begin_popup(SELECTION_POPUP_ID) {
         for item in SELECTION_POPUP_ITEMS {
             // Copy is enabled only when image is ready (not pending) and texture exists.
             let enabled = !is_pending && app_state.current_texture().is_some();
-            if ui
-                .menu_item_config(item.name)
-                .enabled(enabled)
-                .build()
-            {
+            if ui.menu_item_config(item.name).enabled(enabled).build() {
                 if item.name == "Copy" {
                     app_state.copy_region_to_clipboard(None);
                 }

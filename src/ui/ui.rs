@@ -3,18 +3,16 @@ use crate::app::{
     format_file_size,
 };
 use crate::core::media::MediaEntry;
-use crate::infra::config::BackgroundMode;
-use crate::math::{Point2D, Rect2D};
 use crate::render::app_resources::AppResources;
 use imgui::{Condition, ImColor32, MouseButton, MouseCursor, StyleColor, StyleVar, TableFlags, Ui};
 
 use super::bookmark_window::render_bookmark_window;
-use super::helper::render_image_selection_widget;
 use super::keyboard_shortcuts_window::render_keyboard_shortcuts_window;
 use super::layout_constants::{
-    CHECKER_TILE_SIZE, MIN_LIBRARY_WIDTH, MIN_SELECTION_SIZE, MIN_VIEWER_WIDTH, SPLITTER_WIDTH,
+    MIN_LIBRARY_WIDTH, MIN_VIEWER_WIDTH, SPLITTER_WIDTH,
     grid_cell_size,
 };
+use super::view_panel::ViewPanel;
 
 const LIBRARY_SORT_FIELDS: [&str; 3] = ["Name", "Date", "Size"];
 const LIBRARY_SORT_DIRECTIONS: [&str; 2] = ["Ascending", "Descending"];
@@ -26,10 +24,6 @@ const OPEN_IN_FILE_MANAGER_LABEL: &str = "Open In Explorer";
 #[cfg(not(any(target_os = "macos", target_os = "windows")))]
 const OPEN_IN_FILE_MANAGER_LABEL: &str = "Open In File Manager";
 
-// Square cell size for each thumbnail when several selected images are shown
-// side by side in the viewer panel.
-const MULTI_VIEW_CELL_SIZE: f32 = 160.0;
-
 // Library row colors: a very light tint while hovering and a slightly stronger
 // tint for selected rows, so multi-selection reads clearly.
 const LIBRARY_HOVER_COLOR: [f32; 4] = [1.0, 1.0, 1.0, 0.12];
@@ -38,11 +32,12 @@ const LIBRARY_SELECTED_COLOR: [f32; 4] = [1.0, 1.0, 1.0, 0.28];
 pub fn render_ui(
     ui: &imgui::Ui,
     app_state: &mut ViewerState,
+    view_panel: &mut ViewPanel,
     is_pending: bool,
     app_resources: &AppResources,
     running: &mut bool,
 ) {
-    render_main_menu_bar(ui, app_state, running);
+    render_main_menu_bar(ui, app_state, view_panel, running);
 
     let display = ui.io().display_size;
     // Compute heights using the effective font size so scaled fonts keep layout tight.
@@ -337,46 +332,7 @@ pub fn render_ui(
                 ui.same_line();
             }
 
-            ui.child_window("ViewerPanel")
-                .size([0.0, 0.0])
-                .border(true)
-                .build(|| {
-                    const INFO_WIDTH: f32 = 200.0;
-                    let _pad = ui.push_style_var(StyleVar::ItemSpacing([4.0, 4.0]));
-                    let mut image_width = ui.content_region_avail()[0];
-                    let show_info = app_state.show_info() && image_width > INFO_WIDTH + SPLITTER_WIDTH;
-
-                    if show_info {
-                        image_width -= INFO_WIDTH + SPLITTER_WIDTH;
-                    }
-
-                    ui.child_window("image_region")
-                        .size([image_width.max(100.0), 0.0])
-                        .flags(imgui::WindowFlags::HORIZONTAL_SCROLLBAR)
-                        .build(|| {
-                            render_image_content(ui, app_state, app_resources, is_pending);
-                        });
-
-                    if show_info {
-                        ui.same_line();
-                        ui.invisible_button(
-                            "info_splitter",
-                            [SPLITTER_WIDTH, ui.content_region_avail()[1]],
-                        );
-                        if ui.is_item_hovered() {
-                            ui.set_mouse_cursor(Some(MouseCursor::ResizeEW));
-                        }
-                        ui.same_line();
-
-                        ui.child_window("info_region").size([0.0, 0.0]).build(|| {
-                            if app_state.is_multi_select() {
-                                render_multi_selection_info(ui, app_state);
-                            } else {
-                                render_file_info(ui, app_state.current_entry());
-                            }
-                        });
-                    }
-                });
+            view_panel.render(ui, app_state, app_resources, is_pending);
         });
 
     ui.window("Status")
@@ -397,7 +353,7 @@ pub fn render_ui(
         app_state.set_show_keyboard_shortcuts(open);
     }
     render_bookmark_window(ui, app_state);
-    render_selection_window(ui, app_state);
+    view_panel.render_aux_windows(ui, app_state);
 
     if let Some(id) = close_directory {
         app_state.close_directory(id);
@@ -414,67 +370,12 @@ pub fn render_ui(
     }
 }
 
-fn render_image_background(
-    ui: &Ui,
-    app_state: &ViewerState,
-    image_screen_min: [f32; 2],
-    image_display_size: [f32; 2],
+fn render_main_menu_bar(
+    ui: &imgui::Ui,
+    app_state: &mut ViewerState,
+    view_panel: &mut ViewPanel,
+    running: &mut bool,
 ) {
-    if image_display_size[0] <= 0.0 || image_display_size[1] <= 0.0 {
-        return;
-    }
-
-    let style = &app_state.config().background_style;
-    let (color1_rgb, color2_rgb) = style.resolved_colors_rgb();
-    let color1 = rgb_to_im_color32(color1_rgb);
-    let color2 = rgb_to_im_color32(color2_rgb);
-
-    let draw_list = ui.get_window_draw_list();
-    let min = image_screen_min;
-    let max = [
-        image_screen_min[0] + image_display_size[0],
-        image_screen_min[1] + image_display_size[1],
-    ];
-
-    match style.mode {
-        BackgroundMode::Solid => {
-            draw_list.add_rect(min, max, color1).filled(true).build();
-        }
-        BackgroundMode::Checker => {
-            let mut y = min[1];
-            let mut row = 0usize;
-            let y_end = max[1];
-            while y < y_end {
-                let y_next = (y + CHECKER_TILE_SIZE).min(y_end);
-                let mut x = min[0];
-
-                let mut col = 0usize;
-                let x_end = max[0];
-                while x < x_end {
-                    let x_next = (x + CHECKER_TILE_SIZE).min(x_end);
-                    let tile_color = if (row + col) % 2 == 0 { color1 } else { color2 };
-                    draw_list
-                        .add_rect([x, y], [x_next, y_next], tile_color)
-                        .filled(true)
-                        .build();
-                    x = x_next;
-                    col += 1;
-                }
-                y = y_next;
-                row += 1;
-            }
-        }
-    }
-}
-
-fn rgb_to_im_color32(rgb: [f32; 3]) -> ImColor32 {
-    let r = (rgb[0].clamp(0.0, 1.0) * 255.0).round() as u8;
-    let g = (rgb[1].clamp(0.0, 1.0) * 255.0).round() as u8;
-    let b = (rgb[2].clamp(0.0, 1.0) * 255.0).round() as u8;
-    ImColor32::from_rgba(r, g, b, 255)
-}
-
-fn render_main_menu_bar(ui: &imgui::Ui, app_state: &mut ViewerState, running: &mut bool) {
     ui.main_menu_bar(|| {
         ui.menu("File", || {
             if ui.menu_item("Open Directory...") {
@@ -503,23 +404,6 @@ fn render_main_menu_bar(ui: &imgui::Ui, app_state: &mut ViewerState, running: &m
             }
         });
         ui.menu("View", || {
-            ui.menu("Layout", || {
-                let mut show_library = app_state.show_library();
-                if ui
-                    .menu_item_config("Library")
-                    .selected(show_library)
-                    .build()
-                {
-                    show_library = !show_library;
-                    app_state.set_show_library(show_library);
-                }
-
-                let mut show_info = app_state.show_info();
-                if ui.menu_item_config("Info").selected(show_info).build() {
-                    show_info = !show_info;
-                    app_state.set_show_info(show_info);
-                }
-            });
             ui.menu("Image", || {
                 let image_mode = app_state.image_view_mode();
                 if ui
@@ -546,15 +430,24 @@ fn render_main_menu_bar(ui: &imgui::Ui, app_state: &mut ViewerState, running: &m
             });
         });
         ui.menu("Window", || {
-            let mut show_selection_window = app_state.show_selection_window();
-            if ui
-                .menu_item_config("Selection")
-                .selected(show_selection_window)
-                .build()
-            {
-                show_selection_window = !show_selection_window;
-                app_state.set_show_selection_window(show_selection_window);
-            }
+            ui.menu("Layout", || {
+                let mut show_library = app_state.show_library();
+                if ui
+                    .menu_item_config("Library")
+                    .selected(show_library)
+                    .build()
+                {
+                    show_library = !show_library;
+                    app_state.set_show_library(show_library);
+                }
+
+                let mut show_info = app_state.show_info();
+                if ui.menu_item_config("Info").selected(show_info).build() {
+                    show_info = !show_info;
+                    app_state.set_show_info(show_info);
+                }
+            });
+            view_panel.render_window_menu(ui, app_state);
         });
         ui.menu("Help", || {
             if ui.menu_item("Keyboard Shortcuts") {
@@ -582,101 +475,8 @@ pub fn file_info_text(entry:Option<&MediaEntry>) -> String {
     }
 }
 
-pub fn render_file_info(ui: &imgui::Ui, entry:Option<&MediaEntry>) {
-    if let Some(entry) = entry {
-        ui.text_wrapped(format!("File: {}", entry.file_name));
-        ui.text(format!("Format: {}", entry.format.as_str()));
-        ui.text(format!("Size: {}", format_file_size(entry.file_size)));
-        if let Some((w, h)) = entry.dimensions {
-            ui.text(format!("Resolution: {} x {}", w, h));
-        }
-    } else {
-        ui.text("No file selected");
-    }
-    ui.separator();
-}
-
-fn render_selection_window(ui: &Ui, app_state: &mut ViewerState) {
-    if !app_state.show_selection_window() {
-        return;
-    }
-
-    let mut open = true;
-    ui.window("Selection")
-        .opened(&mut open)
-        .size([360.0, 280.0], Condition::FirstUseEver)
-        .build(|| {
-            let Some((image_w, image_h)) = app_state.current_image_size() else {
-                ui.text("No image loaded.");
-                return;
-            };
-
-            ui.text(format!("Image Size: {} x {}", image_w, image_h));
-            ui.spacing();
-
-            let Some(selection) = app_state.image_selection() else {
-                ui.text("No selection.");
-                ui.text("Drag on the image to create a selection.");
-                return;
-            };
-
-            let mut edited = selection;
-            let mut changed = false;
-            let table_flags = TableFlags::BORDERS
-                | TableFlags::SIZING_STRETCH_PROP
-                | TableFlags::NO_SAVED_SETTINGS;
-
-            ui.dummy([0.0, 8.0]);
-
-            if let Some(_table) =
-                ui.begin_table_with_flags("selection_property_grid", 2, table_flags)
-            {
-                changed |=
-                    property_grid_float_row(ui, "Min X", "##selection_min_x", &mut edited.min.x);
-                changed |=
-                    property_grid_float_row(ui, "Min Y", "##selection_min_y", &mut edited.min.y);
-                changed |=
-                    property_grid_float_row(ui, "Max X", "##selection_max_x", &mut edited.max.x);
-                changed |=
-                    property_grid_float_row(ui, "Max Y", "##selection_max_y", &mut edited.max.y);
-
-                let mut width = edited.width();
-                if property_grid_float_row(ui, "Width", "##selection_width", &mut width) {
-                    edited.max.x = edited.min.x + width.max(MIN_SELECTION_SIZE);
-                    changed = true;
-                }
-
-                let mut height = edited.height();
-                if property_grid_float_row(ui, "Height", "##selection_height", &mut height) {
-                    edited.max.y = edited.min.y + height.max(MIN_SELECTION_SIZE);
-                    changed = true;
-                }
-            }
-
-            if changed {
-                let clamped =
-                    clamp_selection_rect_to_image(edited, [image_w as f32, image_h as f32]);
-                app_state.set_image_selection(Some(clamped));
-            }
-
-            ui.dummy([0.0, 8.0]);
-            if app_state.image_selection().is_some() {
-                let _pad = ui.push_style_var(StyleVar::ItemSpacing([4.0, 4.0]));
-                if ui.button("Copy to Clipboard") {
-                    app_state.copy_region_to_clipboard(None);
-                }
-
-                if ui.button("Clear Selection") {
-                    app_state.clear_image_selection_state();
-                }
-            }
-        });
-
-    app_state.set_show_selection_window(open);
-}
-
 /// Resolve the thumbnail texture info for an entry, falling back to the empty icon.
-fn resolve_thumbnail<'a>(
+pub(super) fn resolve_thumbnail<'a>(
     entry: &'a MediaEntry,
     app_resources: &'a AppResources,
 ) -> (imgui::TextureId, [f32; 4], u32, u32) {
@@ -691,7 +491,7 @@ fn resolve_thumbnail<'a>(
 }
 
 /// Fit-scale a source image into a square cell of `cell` pixels.
-fn fit_scale_in_cell(img_w: u32, img_h: u32, cell: f32) -> (f32, f32) {
+pub(super) fn fit_scale_in_cell(img_w: u32, img_h: u32, cell: f32) -> (f32, f32) {
     let scale = (cell / img_w as f32).min(cell / img_h as f32);
     (img_w as f32 * scale, img_h as f32 * scale)
 }
@@ -984,149 +784,4 @@ fn scaled_constant(ui: &Ui, value: f32) -> f32 {
 fn scale_with_font_global(ui: &Ui, value: f32) -> f32 {
     let scale = ui.io().font_global_scale.max(0.01);
     value * scale
-}
-
-fn property_grid_float_row(ui: &Ui, name: &str, id: &str, value: &mut f32) -> bool {
-    ui.table_next_row();
-    ui.table_next_column();
-    ui.text(name);
-    ui.table_next_column();
-    ui.set_next_item_width(-1.0);
-    ui.input_float(id, value).display_format("%.1f").build()
-}
-
-fn clamp_selection_rect_to_image(rect: Rect2D, image_size: [f32; 2]) -> Rect2D {
-    let (min_x, max_x) = clamp_selection_axis(rect.min.x, rect.max.x, image_size[0]);
-    let (min_y, max_y) = clamp_selection_axis(rect.min.y, rect.max.y, image_size[1]);
-
-    Rect2D::new(Point2D::new(min_x, min_y), Point2D::new(max_x, max_y))
-}
-
-fn clamp_selection_axis(mut min: f32, mut max: f32, bound: f32) -> (f32, f32) {
-    let axis_bound = bound.max(MIN_SELECTION_SIZE);
-    min = min.clamp(0.0, axis_bound);
-    max = max.clamp(0.0, axis_bound);
-    if min > max {
-        std::mem::swap(&mut min, &mut max);
-    }
-    if max - min < MIN_SELECTION_SIZE {
-        max = (min + MIN_SELECTION_SIZE).min(axis_bound);
-        min = (max - MIN_SELECTION_SIZE).max(0.0);
-    }
-    (min, max)
-}
-
-fn render_image_content(
-    ui: &imgui::Ui,
-    app_state: &mut ViewerState,
-    app_resources: &AppResources,
-    is_pending: bool,
-) {
-    // With several files selected, show their thumbnails in a grid instead of a
-    // single decoded image. Thumbnails are already in memory, so nothing extra
-    // is loaded here.
-    if app_state.is_multi_select() {
-        render_selected_images_grid(ui, app_state, app_resources);
-        return;
-    }
-
-    if let Some(ref texture) = app_state.current_texture() {
-        let avail = ui.content_region_avail();
-        let fb_scale = ui.io().display_framebuffer_scale[0];
-        let width_scale = avail[0] / texture.width as f32;
-        let height_scale = avail[1] / texture.height as f32;
-        let scale = match app_state.image_view_mode() {
-            ImageViewMode::Original => 1.0 / fb_scale,
-            ImageViewMode::FitToWindow => width_scale.min(height_scale),
-            ImageViewMode::FitToWidth => width_scale,
-        }
-        .max(0.01);
-        let display_size = [texture.width as f32 * scale, texture.height as f32 * scale];
-        let cursor = ui.cursor_pos();
-        let centered = [
-            (avail[0] - display_size[0]).max(0.0) * 0.5,
-            (avail[1] - display_size[1]).max(0.0) * 0.5,
-        ];
-        ui.set_cursor_pos([
-            (cursor[0] + centered[0]).floor(),
-            (cursor[1] + centered[1]).floor(),
-        ]);
-
-        let image_screen_min = ui.cursor_screen_pos();
-        render_image_background(ui, app_state, image_screen_min, display_size);
-
-        let uv0 = [0.0, 0.0];
-        let uv1 = [1.0, 1.0];
-        imgui::Image::new(texture.id, display_size)
-            .uv0(uv0)
-            .uv1(uv1)
-            .build(ui);
-
-        let view_panel_min = ui.window_pos();
-        let view_panel_max = [
-            view_panel_min[0] + ui.window_size()[0],
-            view_panel_min[1] + ui.window_size()[1],
-        ];
-
-        render_image_selection_widget(
-            ui,
-            app_state,
-            is_pending,
-            view_panel_min,
-            view_panel_max,
-            ui.item_rect_min(),
-            display_size,
-            [texture.width as f32, texture.height as f32],
-        );
-    } else if app_state.current_directory().is_some() {
-        ui.text("No image selected or decode failed.");
-    } else {
-        ui.text("Welcome to Just Image Viewer");
-        ui.text("Open an image directory to begin.");
-    }
-}
-
-/// Draw every selected image as a thumbnail grid in the viewer panel. Uses the
-/// already-decoded thumbnails, so no extra image is loaded.
-fn render_selected_images_grid(ui: &Ui, app_state: &ViewerState, app_resources: &AppResources) {
-    let cell = MULTI_VIEW_CELL_SIZE;
-    let spacing = ui.clone_style().item_spacing[0].max(4.0);
-    let available = ui.content_region_avail()[0].max(cell);
-    let columns = (((available + spacing) / (cell + spacing)).floor() as usize).max(1);
-
-    let mut column = 0usize;
-    for entry in app_state.selected_entries() {
-        if column != 0 {
-            ui.same_line();
-        }
-
-        let (texture_id, uvs, img_w, img_h) = resolve_thumbnail(entry, app_resources);
-        let (draw_w, draw_h) = fit_scale_in_cell(img_w, img_h, cell);
-        // Reserve a uniform square cell and center the thumbnail inside it so the
-        // rows stay aligned regardless of each image's aspect ratio.
-        let origin = ui.cursor_screen_pos();
-        let img_x = origin[0] + (cell - draw_w) * 0.5;
-        let img_y = origin[1] + (cell - draw_h) * 0.5;
-        ui.get_window_draw_list()
-            .add_image(texture_id, [img_x, img_y], [img_x + draw_w, img_y + draw_h])
-            .uv_min([uvs[0], uvs[1]])
-            .uv_max([uvs[2], uvs[3]])
-            .build();
-        ui.dummy([cell, cell]);
-
-        column += 1;
-        if column >= columns {
-            column = 0;
-        }
-    }
-}
-
-/// Show a summary of the multi-selection in the info panel: the count followed
-/// by each selected file name.
-fn render_multi_selection_info(ui: &Ui, app_state: &ViewerState) {
-    ui.text(format!("{} files selected", app_state.selected_count()));
-    ui.separator();
-    for entry in app_state.selected_entries() {
-        ui.text_wrapped(&entry.file_name);
-    }
 }
