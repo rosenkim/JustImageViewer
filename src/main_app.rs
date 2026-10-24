@@ -25,7 +25,7 @@ use winit::{
 use crate::app::ViewerState;
 use crate::constants;
 use crate::constants::{LOGICAL_DPI, POINTS_PER_INCH};
-use crate::core::image_manager::ImageManager;
+use crate::core::media_manager::MediaManager;
 use crate::infra;
 use crate::infra::config::{AppTheme, APPLICATION};
 use crate::render::app_resources::AppResources;
@@ -61,7 +61,7 @@ pub struct MainApp {
     texture_atlas: TextureAtlasManager,
     app_resources: AppResources,
 
-    image_manager: ImageManager,
+    media_manager: MediaManager,
     image_uploader: ImageUploader,
 
     ui_scale_factor: f32,
@@ -216,24 +216,24 @@ impl MainApp {
         let app_resources = AppResources::new(&device, &queue, &mut renderer)
             .context("failed to initialize global app resources")?;
 
-        let mut image_cache_count = app_state.config().image_cache_count;
-        if image_cache_count == 0 {
+        let mut media_cache_count = app_state.config().media_cache_count;
+        if media_cache_count == 0 {
             log::warn!(
-                "Invalid image_cache_count ({}). Falling back to {}",
-                image_cache_count,
-                constants::DEFAULT_IMAGE_CACHE_COUNT
+                "Invalid media_cache_count ({}). Falling back to {}",
+                media_cache_count,
+                constants::DEFAULT_MEDIA_CACHE_COUNT
             );
-            image_cache_count = constants::DEFAULT_IMAGE_CACHE_COUNT;
+            media_cache_count = constants::DEFAULT_MEDIA_CACHE_COUNT;
         }
 
         let max_texture_size = device.limits().max_texture_dimension_2d;
-        let image_manager = ImageManager::new(image_cache_count);
+        let media_manager = MediaManager::new(media_cache_count);
         let image_uploader = ImageUploader::new(max_texture_size);
 
         log::info!(
-            "TextureManager created with max_texture_size: {}, image_cache_count: {}",
+            "TextureManager created with max_texture_size: {}, media_cache_count: {}",
             max_texture_size,
-            image_cache_count
+            media_cache_count
         );
 
         Ok(Self {
@@ -252,7 +252,7 @@ impl MainApp {
             imgui_textures,
             texture_atlas,
             app_resources,
-            image_manager,
+            media_manager,
             image_uploader,
             ui_scale_factor,
             focused_frame_interval: frame_interval_from_fps(focused_fps),
@@ -318,7 +318,7 @@ impl MainApp {
         if self.app_state.take_reload_request() {
             if let Some(entry) = self.app_state.current_entry() {
                 self.image_uploader
-                    .request_decode(&entry.path, &mut self.image_manager);
+                    .request_decode(&entry.path, &mut self.media_manager);
             } else {
                 // No image selected (e.g. directory changed). Cancel any stale decode.
                 self.image_uploader.cancel_pending();
@@ -350,7 +350,7 @@ impl MainApp {
             &self.queue,
             &mut self.renderer,
             &mut self.imgui_textures,
-            &mut self.image_manager,
+            &mut self.media_manager,
         ) {
             // Only apply if the decoded image still matches the current selection.
             let is_current = self
@@ -668,7 +668,7 @@ impl MainApp {
 
         self.app_state.flush_bookmarks_if_dirty();
         save_config_on_exit(&mut self.app_state);
-        self.image_manager.clear();
+        self.media_manager.clear();
         self.image_uploader
             .clear(&mut self.renderer, &mut self.imgui_textures);
         self.texture_atlas

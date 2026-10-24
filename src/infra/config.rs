@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::app::{ImageViewMode, LibrarySortField, SortDirection};
 use crate::constants::{DEFAULT_BACKGROUND_COLOR1, DEFAULT_BACKGROUND_COLOR2, LOGICAL_DPI, POINTS_PER_INCH};
-use crate::constants::{DEFAULT_FOCUSED_FPS, DEFAULT_UNFOCUSED_FPS, DEFAULT_IMAGE_CACHE_COUNT, DEFAULT_UI_FONT_SIZE_PT, DEFAULT_UI_SCALE_FACTOR, DEFAULT_LIBRARY_WIDTH};
+use crate::constants::{DEFAULT_FOCUSED_FPS, DEFAULT_UNFOCUSED_FPS, DEFAULT_MEDIA_CACHE_COUNT, DEFAULT_UI_FONT_SIZE_PT, DEFAULT_UI_SCALE_FACTOR, DEFAULT_LIBRARY_WIDTH};
 use crate::constants::{DEFAULT_LIBRARY_THUMBNAIL_SIZE, DEFAULT_THUMBNAIL_IMAGE_SIZE};
 
 const QUALIFIER: &str = "com";
@@ -35,7 +35,7 @@ pub struct AppConfig {
     #[serde(alias = "imgui_style")]
     pub imgui_theme: AppTheme,
     pub background_style: BackgroundStyle,
-    pub image_cache_count: usize,
+    pub media_cache_count: usize,
     pub focused_fps: u32,
     pub unfocused_fps: u32,
     pub http_port: u16,
@@ -90,7 +90,7 @@ impl Default for AppConfig {
             ui_scale_factor: DEFAULT_UI_SCALE_FACTOR,
             imgui_theme: AppTheme::default(),
             background_style: BackgroundStyle::default(),
-            image_cache_count: DEFAULT_IMAGE_CACHE_COUNT,
+            media_cache_count: DEFAULT_MEDIA_CACHE_COUNT,
             focused_fps: DEFAULT_FOCUSED_FPS,
             unfocused_fps: DEFAULT_UNFOCUSED_FPS,
             http_port: 0,

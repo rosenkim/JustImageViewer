@@ -8,6 +8,12 @@ use std::{
 use anyhow::{Context, Result};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MediaType {
+    Image2D,
+    Model3D,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MediaFormat {
     Png,
     Jpeg,
@@ -21,9 +27,27 @@ pub enum MediaFormat {
     // Hdr,
     Dds,
     Farbfeld,
+    Glb,
 }
 
 impl MediaFormat {
+    pub fn media_type(&self) -> MediaType {
+        match self {
+            Self::Png
+            | Self::Jpeg
+            | Self::Bmp
+            | Self::Gif
+            | Self::WebP
+            | Self::Tiff
+            | Self::Tga
+            | Self::Ico
+            | Self::Pnm
+            | Self::Dds
+            | Self::Farbfeld => MediaType::Image2D,
+            Self::Glb => MediaType::Model3D,
+        }
+    }
+
     pub fn from_extension(ext: &str) -> Option<Self> {
         match ext.to_ascii_lowercase().as_str() {
             "png" => Some(Self::Png),
@@ -38,6 +62,7 @@ impl MediaFormat {
             // "hdr" => Some(Self::Hdr),
             "dds" => Some(Self::Dds),
             "ff" | "farbfeld" => Some(Self::Farbfeld),
+            "glb" => Some(Self::Glb),
             _ => None,
         }
     }
@@ -56,6 +81,7 @@ impl MediaFormat {
             // Self::Hdr => "HDR",
             Self::Dds => "DDS",
             Self::Farbfeld => "Farbfeld",
+            Self::Glb => "GLB",
         }
     }
 }
@@ -133,9 +159,12 @@ pub fn scan_directory(root: &Path) -> Result<Vec<MediaEntry>> {
             .map(|s| s.to_owned())
             .unwrap_or_else(|| path.display().to_string());
         // Read only image header info here so UI can show resolution without full decode.
-        let dimensions = image::image_dimensions(&path)
-            .ok()
-            .map(|(width, height)| (width as usize, height as usize));
+        let dimensions = match format.media_type() {
+            MediaType::Image2D => image::image_dimensions(&path)
+                .ok()
+                .map(|(width, height)| (width as usize, height as usize)),
+            MediaType::Model3D => None,
+        };
 
         entries.push(MediaEntry {
             path,

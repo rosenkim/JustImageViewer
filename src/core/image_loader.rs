@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use anyhow::{Context, Result};
 
-use crate::core::media::MediaFormat;
+use crate::core::media::{MediaFormat, MediaType};
 
 #[derive(Debug, Clone)]
 pub struct DecodedImage {
@@ -84,4 +84,5 @@ fn detect_format(path: &Path) -> Option<MediaFormat> {
     path.extension()
         .and_then(|ext| ext.to_str())
         .and_then(MediaFormat::from_extension)
+        .filter(|format| format.media_type() == MediaType::Image2D)
 }

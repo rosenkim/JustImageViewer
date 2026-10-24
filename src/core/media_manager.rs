@@ -5,20 +5,20 @@ use std::{
 
 use std::sync::Arc;
 
-struct CachedImage {
+struct CachedMedia {
     binary: Arc<Vec<u8>>,
     last_used: u64,
 }
 
 /// Cache binary data in an LRU cache.
-pub struct ImageManager {
-    binary_cache: HashMap<PathBuf, CachedImage>,
+pub struct MediaManager {
+    binary_cache: HashMap<PathBuf, CachedMedia>,
     max_cache_count: usize,
     access_counter: u64,
 }
 
-impl ImageManager {
-    /// Create an image manager with binary cache capacity.
+impl MediaManager {
+    /// Create a media manager with binary cache capacity.
     pub fn new(max_cache_count: usize) -> Self {
         Self {
             binary_cache: HashMap::new(),
@@ -67,7 +67,7 @@ impl ImageManager {
         self.access_counter += 1;
         self.binary_cache.insert(
             path,
-            CachedImage {
+            CachedMedia {
                 binary: Arc::new(binary),
                 last_used: self.access_counter,
             },

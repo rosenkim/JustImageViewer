@@ -25,6 +25,7 @@ axum = "0.8"
 arboard = "3.6"
 chrono = "0.4"
 serde_json = "1.0.150"
+base64 = "0.22"
 
 [build-dependencies]
 winres = "0.1"

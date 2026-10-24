@@ -10,7 +10,7 @@ use std::{
 
 use crate::constants::MAX_DECODE_SPAWNS;
 use crate::core::image_loader::DecodedImage;
-use crate::core::image_manager::ImageManager;
+use crate::core::media_manager::MediaManager;
 use crate::render::imgui_textures::ImguiTextures;
 use anyhow::Result;
 use imgui::TextureId;
@@ -30,7 +30,7 @@ pub struct UploadedTexture {
 struct DecodeOutput {
     decoded: DecodedImage,
     /// The raw file bytes, present only when the file was freshly read from disk
-    /// (cache miss). None when the binary was already in ImageManager's cache.
+    /// (cache miss). None when the binary was already in MediaManager's cache.
     fresh_binary: Option<Vec<u8>>,
 }
 
@@ -61,11 +61,11 @@ impl ImageUploader {
 
     /// Kick off a background decode for `path` using `tokio::spawn_blocking`.
     /// Cancels any previously pending decode.
-    pub fn request_decode(&mut self, path: &Path, image_manager: &mut ImageManager) {
+    pub fn request_decode(&mut self, path: &Path, media_manager: &mut MediaManager) {
         let owned_path = path.to_path_buf();
 
         // Try binary cache first (cheap clone), otherwise read file on the blocking thread.
-        let cached_binary = image_manager.take_cached_binary(path);
+        let cached_binary = media_manager.take_cached_binary(path);
 
         while ACTIVE_DECODE_SPAWNS.load(Ordering::Acquire) >= MAX_DECODE_SPAWNS {
             thread::sleep(Duration::from_millis(1));
@@ -89,7 +89,7 @@ impl ImageUploader {
                     fresh_binary: None,
                 })
             } else {
-                // Cache miss: read file and keep binary for ImageManager.
+                // Cache miss: read file and keep binary for MediaManager.
                 decode_from_file(&owned_path).map(|(decoded, binary)| DecodeOutput {
                     decoded,
                     fresh_binary: Some(binary),
@@ -127,7 +127,7 @@ impl ImageUploader {
         queue: &Queue,
         renderer: &mut imgui_wgpu::Renderer,
         imgui_textures: &mut ImguiTextures,
-        image_manager: &mut ImageManager,
+        media_manager: &mut MediaManager,
     ) -> Option<(PathBuf, UploadedTexture)> {
         let pending = self.pending.as_mut()?;
 
@@ -151,9 +151,9 @@ impl ImageUploader {
 
         let path = self.pending.take().unwrap().path;
 
-        // Feed freshly read binary back into ImageManager so future requests hit the cache.
+        // Feed freshly read binary back into MediaManager so future requests hit the cache.
         if let Some(binary) = output.fresh_binary {
-            image_manager.store_binary(path.clone(), binary);
+            media_manager.store_binary(path.clone(), binary);
         }
 
         let decoded = output.decoded;

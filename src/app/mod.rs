@@ -27,7 +27,8 @@ use crate::{
 };
 
 use tokio::sync::mpsc;
-use crate::core::image_loader;
+
+mod thumbnail_worker;
 
 pub use crate::math::Rect2D;
 
@@ -990,40 +991,12 @@ impl ViewerState {
         let tx = self.thumbnail_tx.clone();
         // Decode size comes from settings.toml so users can tune thumbnail quality.
         let thumbnail_size = self.config().thumbnail_image_size;
-        let handle = tokio::task::spawn(async move {
-            for path in paths {
-                // Decode off the async runtime because image codecs are blocking.
-                let result = tokio::task::spawn_blocking({
-                    let path = path.clone();
-                    move || {
-                        image_loader::load_thumbnail_rgba(&path, thumbnail_size)
-                    }
-                })
-                .await;
-
-                match result {
-                    Ok(Ok(decoded)) => {
-                        let msg = ThumbnailResult {
-                            directory_id: id,
-                            path,
-                            width: decoded.width as u32,
-                            height: decoded.height as u32,
-                            pixels: decoded.pixels,
-                        };
-                        if tx.send(msg).await.is_err() {
-                            break;
-                        }
-                    }
-                    Ok(Err(err)) => {
-                        log::warn!("Failed to load thumbnail for {}: {:#}", path.display(), err)
-                    }
-                    Err(err) => {
-                        log::warn!("Thumbnail task panicked for {}: {:#}", path.display(), err)
-                    }
-                }
-                tokio::task::yield_now().await;
-            }
-        });
+        let handle = tokio::task::spawn(thumbnail_worker::generate_thumbnails(
+            id,
+            paths,
+            thumbnail_size,
+            tx,
+        ));
         self.worker_handles.insert(id, handle);
     }
 

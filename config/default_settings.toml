@@ -29,8 +29,8 @@ show_thumbnail = true
 library_thumbnail_size = 108.0
 # Decoded thumbnail image size kept in memory, in pixels (32 - 1024)
 thumbnail_image_size = 128
-# Maximum number of images kept in memory cache
-image_cache_count = 32
+# Maximum number of media files kept in memory cache
+media_cache_count = 32
 # Rendering FPS while window is focused
 focused_fps = 60
 # Rendering FPS while window is unfocused
