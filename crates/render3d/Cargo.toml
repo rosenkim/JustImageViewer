@@ -1,0 +1,20 @@
+[package]
+name = "render3d"
+version = "0.1.0"
+edition = "2024"
+description = "Small offscreen GLB renderer that shares the caller's wgpu device and queue."
+publish = false
+
+# Keep this list short. The crate must not depend on the app, a window, or a UI library.
+[dependencies]
+anyhow = "1.0"
+bytemuck = { version = "1", features = ["derive"] }
+glam = "0.30"
+gltf = { version = "1.4.1", default-features = false, features = ["utils", "names", "KHR_materials_unlit"] }
+# glTF only allows PNG and JPEG textures.
+image = { version = "0.24", default-features = false, features = ["png", "jpeg"] }
+wgpu = "25.0.2"
+
+[dev-dependencies]
+naga = { version = "25", features = ["wgsl-in"] }
+pollster = "0.3"
