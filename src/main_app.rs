@@ -278,6 +278,11 @@ impl MainApp {
     }
 
     fn handle_event(&mut self, event: Event<()>, window_target: &EventLoopWindowTarget<()>) {
+        // Ignore queued redraws after cleanup has released the textures.
+        if window_target.exiting() {
+            return;
+        }
+
         // Let ImGui/winit helper see every event (mouse, keyboard, etc.).
         self.platform
             .handle_event(self.imgui.io_mut(), self.window.as_ref(), &event);
