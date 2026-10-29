@@ -99,6 +99,18 @@ impl Renderer {
         target: &OffscreenTarget,
         encoder: &mut wgpu::CommandEncoder,
     ) -> Result<()> {
+        self.encode_with_background(scene, camera, target, encoder, wgpu::Color::TRANSPARENT)
+    }
+
+    /// Record a pass with a linear background color. Use alpha 1 for direct UI display.
+    pub fn encode_with_background(
+        &self,
+        scene: &Scene,
+        camera: &Camera,
+        target: &OffscreenTarget,
+        encoder: &mut wgpu::CommandEncoder,
+        background: wgpu::Color,
+    ) -> Result<()> {
         // Each pass owns its uniform snapshot, so concurrent views do not overwrite it.
         let uniform = camera.uniform(1.0)?;
         let buffer = self
@@ -138,7 +150,7 @@ impl Renderer {
                     view: &target.color_view,
                     resolve_target: None,
                     ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+                        load: wgpu::LoadOp::Clear(background),
                         store: wgpu::StoreOp::Store,
                     },
                 })],

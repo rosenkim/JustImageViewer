@@ -25,13 +25,15 @@ use winit::{
 use crate::app::ViewerState;
 use crate::constants;
 use crate::constants::{LOGICAL_DPI, POINTS_PER_INCH};
+use crate::core::media::MediaType;
 use crate::core::media_manager::MediaManager;
 use crate::infra;
-use crate::infra::config::{AppTheme, APPLICATION};
+use crate::infra::config::{APPLICATION, AppTheme};
 use crate::render::app_resources::AppResources;
 use crate::render::image_uploader::ImageUploader;
 use crate::render::imgui_textures::ImguiTextures;
 use crate::render::texture_atlas_manager::TextureAtlasManager;
+use crate::render::view_gpu::ViewGpuContext;
 use crate::ui::render_ui;
 use crate::ui::view_panel::ViewPanel;
 
@@ -103,14 +105,6 @@ impl MainApp {
             }
         }
 
-        if let Some(open_path) = open_path {
-            app_state
-                .open_path_argument(open_path)
-                .context("failed to open PATH argument")?;
-        } else {
-            app_state.restore_saved_directories();
-        }
-
         // Validate FPS settings
         let focused_fps = if app_state.config().focused_fps > 0 {
             app_state.config().focused_fps
@@ -178,6 +172,15 @@ impl MainApp {
             })
             .await
             .context("failed to request wgpu device")?;
+
+        app_state.set_thumbnail_gpu(&device, &queue);
+        if let Some(open_path) = open_path {
+            app_state
+                .open_path_argument(open_path)
+                .context("failed to open PATH argument")?;
+        } else {
+            app_state.restore_saved_directories();
+        }
 
         let surface_config = create_surface_config(&surface, &adapter, window.inner_size())
             .context("failed to configure surface")?;
@@ -314,15 +317,19 @@ impl MainApp {
         self.next_redraw_at = now + frame_interval;
         window_target.set_control_flow(ControlFlow::WaitUntil(self.next_redraw_at));
 
-        // Reload current image/texture if someone requested it.
+        // Route reloads to the selected media type.
         if self.app_state.take_reload_request() {
-            if let Some(entry) = self.app_state.current_entry() {
+            self.view_panel.request_reload();
+            if let Some(entry) = self.app_state.current_entry().filter(|entry| {
+                entry.format.media_type() == MediaType::Image2D && !self.app_state.is_multi_select()
+            }) {
                 self.image_uploader
                     .request_decode(&entry.path, &mut self.media_manager);
             } else {
-                // No image selected (e.g. directory changed). Cancel any stale decode.
+                // Model views and thumbnail grids do not need an image decode.
                 self.image_uploader.cancel_pending();
-                if let Some(texture_id) = self.app_state.current_texture().map(|texture| texture.id) {
+                if let Some(texture_id) = self.app_state.current_texture().map(|texture| texture.id)
+                {
                     self.image_uploader.release_texture(
                         &mut self.renderer,
                         &mut self.imgui_textures,
@@ -340,7 +347,9 @@ impl MainApp {
             );
             infra::web_server::set_selected_file(
                 &webserver.shared_state,
-                self.app_state.current_entry().map(|entry| entry.path.clone()),
+                self.app_state
+                    .current_entry()
+                    .map(|entry| entry.path.clone()),
             );
         }
 
@@ -353,10 +362,11 @@ impl MainApp {
             &mut self.media_manager,
         ) {
             // Only apply if the decoded image still matches the current selection.
-            let is_current = self
-                .app_state
-                .current_entry()
-                .map_or(false, |e| e.path == decoded_path);
+            let is_current = self.app_state.current_entry().is_some_and(|entry| {
+                entry.path == decoded_path
+                    && entry.format.media_type() == MediaType::Image2D
+                    && !self.app_state.is_multi_select()
+            });
             if is_current {
                 if let Some(existing_texture) = self.app_state.current_texture() {
                     self.image_uploader.release_texture(
@@ -587,14 +597,24 @@ impl MainApp {
             .texture
             .create_view(&wgpu::TextureViewDescriptor::default());
 
+        self.view_panel.prepare_frame(
+            &self.app_state,
+            &mut ViewGpuContext {
+                device: &self.device,
+                queue: &self.queue,
+                renderer: &mut self.renderer,
+            },
+        );
+
         // Build ImGui UI for this frame.
         let ui = self.imgui.frame();
         let mut running = true;
+        let is_pending = self.image_uploader.is_pending() || self.view_panel.is_pending();
         render_ui(
             ui,
             &mut self.app_state,
             &mut self.view_panel,
-            self.image_uploader.is_pending(),
+            is_pending,
             &self.app_resources,
             &mut running,
         );
@@ -615,6 +635,9 @@ impl MainApp {
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("image-viewer encoder"),
             });
+
+        // Model passes must finish before ImGui samples their textures.
+        self.view_panel.encode_frame(&mut encoder);
 
         let (background_color1, _) = self
             .app_state
@@ -669,6 +692,11 @@ impl MainApp {
         self.app_state.flush_bookmarks_if_dirty();
         save_config_on_exit(&mut self.app_state);
         self.media_manager.clear();
+        self.view_panel.release(&mut ViewGpuContext {
+            device: &self.device,
+            queue: &self.queue,
+            renderer: &mut self.renderer,
+        });
         self.image_uploader
             .clear(&mut self.renderer, &mut self.imgui_textures);
         self.texture_atlas
@@ -795,22 +823,14 @@ fn setup_fonts(
             config: Some(FontConfig {
                 glyph_ranges: FontGlyphRanges::from_slice(&[
                     // Basic Latin + Latin Supplement
-                    0x0020, 0x00FF,
-                    // Korean (Hangul Syllables)
-                    0xAC00, 0xD7A3,
-                    // Korean (Hangul Jamo)
-                    0x1100, 0x11FF,
-                    // Korean (Hangul Compatibility Jamo)
-                    0x3130, 0x318F,
-                    // CJK Unified Ideographs (common Hanja and Kanji)
-                    0x4E00, 0x9FFF,
-                    // Japanese punctuation, Hiragana, and Katakana
-                    0x3000, 0x30FF,
-                    // Katakana Phonetic Extensions
-                    0x31F0, 0x31FF,
-                    // Half-width Katakana and full-width forms
-                    0xFF00, 0xFFEF,
-                    // Null terminator
+                    0x0020, 0x00FF, // Korean (Hangul Syllables)
+                    0xAC00, 0xD7A3, // Korean (Hangul Jamo)
+                    0x1100, 0x11FF, // Korean (Hangul Compatibility Jamo)
+                    0x3130, 0x318F, // CJK Unified Ideographs (common Hanja and Kanji)
+                    0x4E00, 0x9FFF, // Japanese punctuation, Hiragana, and Katakana
+                    0x3000, 0x30FF, // Katakana Phonetic Extensions
+                    0x31F0, 0x31FF, // Half-width Katakana and full-width forms
+                    0xFF00, 0xFFEF, // Null terminator
                     0,
                 ]),
                 ..FontConfig::default()
@@ -932,7 +952,6 @@ fn save_config_on_exit(app_state: &ViewerState) {
         log::error!("failed to persist application configuration: {err:#}");
     }
 }
-
 
 fn load_window_icon() -> Option<Icon> {
     // 런타임 파일로 로드해도 되고, 배포 편하게 include_bytes!로 박아도 됨.

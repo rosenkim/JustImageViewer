@@ -193,6 +193,7 @@ pub struct ViewerState {
     current_texture: Option<UploadedTexture>,
 
     worker_handles: HashMap<DirectoryId, tokio::task::JoinHandle<()>>,
+    thumbnail_gpu: Option<(wgpu::Device, wgpu::Queue)>,
     thumbnail_tx: mpsc::Sender<ThumbnailResult>,
     thumbnail_rx: mpsc::Receiver<ThumbnailResult>,
 }
@@ -279,6 +280,7 @@ impl ViewerState {
             current_texture: None,
 
             worker_handles: HashMap::new(),
+            thumbnail_gpu: None,
             thumbnail_tx,
             thumbnail_rx,
         }
@@ -964,6 +966,10 @@ impl ViewerState {
         }
     }
 
+    pub fn set_thumbnail_gpu(&mut self, device: &wgpu::Device, queue: &wgpu::Queue) {
+        self.thumbnail_gpu = Some((device.clone(), queue.clone()));
+    }
+
     fn cancel_thumbnail_work(&mut self, id: DirectoryId) {
         if let Some(handle) = self.worker_handles.remove(&id) {
             handle.abort();
@@ -996,6 +1002,7 @@ impl ViewerState {
             paths,
             thumbnail_size,
             tx,
+            self.thumbnail_gpu.clone(),
         ));
         self.worker_handles.insert(id, handle);
     }

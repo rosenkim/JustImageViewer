@@ -90,6 +90,11 @@ impl OffscreenTarget {
         &self.color_view
     }
 
+    /// Share the existing color texture with a GPU-based UI without a copy.
+    pub fn color_texture(&self) -> &wgpu::Texture {
+        &self.color
+    }
+
     /// Submit after the render pass, then wait for the pixels on the calling thread.
     pub(crate) fn read_pixels(
         &mut self,

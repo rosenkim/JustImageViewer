@@ -65,6 +65,11 @@ queue.submit([encoder.finish()]);
 // 이후 UI pass에서 target.color_view()를 샘플링한다. 포맷은 Rgba8UnormSrgb.
 ```
 
+`Renderer::encode_with_background()`는 선형 색 공간의 `wgpu::Color`를 받는다.
+알파를 1로 지정하면 반투명 재질도 불투명 배경 위에 합성된다. 기존 `encode()`는
+투명 배경을 유지한다. `target.color_texture()`로 같은 텍스처를 UI에 공유하면
+복사나 추가 render pass 없이 표시할 수 있다.
+
 renderer, scene, target, command encoder는 모두 같은 GPU device를 사용해야 한다.
 기록되는 pass마다 각자의 camera uniform 스냅샷을 가진다.
 

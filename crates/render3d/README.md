@@ -65,6 +65,11 @@ queue.submit([encoder.finish()]);
 // Sample target.color_view() in a later UI pass. Its format is Rgba8UnormSrgb.
 ```
 
+`Renderer::encode_with_background()` accepts a linear `wgpu::Color`. Use alpha 1
+to render onto an opaque background, including blended materials. The existing
+`encode()` keeps its transparent background. `target.color_texture()` lets a UI
+share the same texture without a copy or an extra render pass.
+
 Use the same GPU device for the renderer, scenes, targets, and command encoder.
 Each recorded pass gets its own camera uniform snapshot.
 
