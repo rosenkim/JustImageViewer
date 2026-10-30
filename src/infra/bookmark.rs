@@ -22,10 +22,37 @@ struct BookmarkRecord {
     bookmarked_at: String,
 }
 
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum StoredBookmark {
+    Record(BookmarkRecord),
+    Path(String),
+}
+
+fn deserialize_bookmarks<'de, D>(
+    deserializer: D,
+) -> std::result::Result<Vec<BookmarkRecord>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let bookmarks = Vec::<StoredBookmark>::deserialize(deserializer)?;
+    Ok(bookmarks
+        .into_iter()
+        .map(|bookmark| match bookmark {
+            StoredBookmark::Record(record) => record,
+            StoredBookmark::Path(path) => BookmarkRecord {
+                path,
+                bookmarked_at: String::new(),
+            },
+        })
+        .collect())
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 struct BookmarkFile {
+    #[serde(deserialize_with = "deserialize_bookmarks")]
     bookmarks: Vec<BookmarkRecord>,
-    #[serde(default)]
+    #[serde(default, alias = "recent")]
     recent_directories: Vec<PathBuf>,
 }
 
@@ -144,6 +171,24 @@ pub fn sort_bookmarks(entries: &mut [BookmarkEntry]) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn loads_legacy_string_bookmarks_and_recent_directories() {
+        let content = r#"{
+            "bookmarks": ["\\\\?\\H:\\AI\\ComfyUI\\output"],
+            "recent": ["\\\\?\\H:\\AI\\ComfyUI\\output", "\\\\?\\C:\\Users\\CHKim\\Downloads"]
+        }"#;
+        let file: BookmarkFile = serde_json::from_str(content).unwrap();
+        assert_eq!(file.bookmarks.len(), 1);
+        assert_eq!(file.bookmarks[0].path, r"\\?\H:\AI\ComfyUI\output");
+        assert!(file.bookmarks[0].bookmarked_at.is_empty());
+        assert_eq!(file.recent_directories.len(), 2);
+
+        let saved = serde_json::to_string(&file).unwrap();
+        let restored: BookmarkFile = serde_json::from_str(&saved).unwrap();
+        assert_eq!(restored.bookmarks[0].path, file.bookmarks[0].path);
+        assert_eq!(restored.recent_directories, file.recent_directories);
+    }
 
     #[test]
     fn history_and_bookmarks_share_existing_bookmarks_file() {
