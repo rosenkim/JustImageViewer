@@ -34,6 +34,7 @@ pub fn render_ui(
     app_state: &mut ViewerState,
     view_panel: &mut ViewPanel,
     is_pending: bool,
+    http_port: Option<u16>,
     app_resources: &AppResources,
     running: &mut bool,
 ) {
@@ -340,6 +341,10 @@ pub fn render_ui(
         .size([display[0], status_height], Condition::Always)
         .flags(window_flags | imgui::WindowFlags::NO_TITLE_BAR)
         .build(|| {
+            if let Some(port) = http_port {
+                ui.text(format!("HTTP: 127.0.0.1:{port} | "));
+                ui.same_line();
+            }
             ui.text(format!("Status: {}", app_state.status_message()));
             ui.same_line();
             if is_pending {

@@ -1,6 +1,7 @@
 use std::io;
 use std::net::SocketAddr;
 use std::path::{Component, Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, RwLock};
 
 use axum::body::Body;
@@ -56,6 +57,7 @@ pub fn start(
     port: u16,
     token: CancellationToken,
     shared_state: SharedWebStateHandle,
+    listening: Arc<AtomicBool>,
 ) -> JoinHandle<()> {
     tokio::spawn(async move {
         let addr: SocketAddr = SocketAddr::from(([127, 0, 0, 1], port));
@@ -70,6 +72,7 @@ pub fn start(
                 return;
             }
         };
+        listening.store(true, Ordering::Release);
 
         let app = Router::new()
             .route("/", get(root))
@@ -88,6 +91,7 @@ pub fn start(
         } else {
             log::info!("HTTP server stopped gracefully");
         }
+        listening.store(false, Ordering::Release);
     })
 }
 

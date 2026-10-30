@@ -8,6 +8,7 @@ use imgui::{Context as ImguiContext, FontConfig, FontGlyphRanges, FontSource};
 use imgui_wgpu::RendererConfig;
 use imgui_winit_support::{HiDpiMode, WinitPlatform};
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, RwLock};
 use std::time::{Duration, Instant};
 use tokio::task::block_in_place;
@@ -41,6 +42,7 @@ struct WebServerState {
     shutdown_token: CancellationToken,
     shared_state: Arc<RwLock<infra::web_server::SharedWebState>>,
     server_handle: tokio::task::JoinHandle<()>,
+    listening: Arc<AtomicBool>,
 }
 
 pub struct MainApp {
@@ -615,11 +617,16 @@ impl MainApp {
         let ui = self.imgui.frame();
         let mut running = true;
         let is_pending = self.image_uploader.is_pending() || self.view_panel.is_pending();
+        let http_port = self.webserver_state.as_ref().and_then(|server| {
+            (server.listening.load(Ordering::Acquire) && !server.server_handle.is_finished())
+                .then_some(self.app_state.config().http_port)
+        });
         render_ui(
             ui,
             &mut self.app_state,
             &mut self.view_panel,
             is_pending,
+            http_port,
             &self.app_resources,
             &mut running,
         );
@@ -883,6 +890,7 @@ fn spawn_web_server(app_state: &ViewerState) -> Option<WebServerState> {
         let port = app_state.config().http_port;
         let shutdown_token = CancellationToken::new();
         let shared_state = infra::web_server::new_shared_state();
+        let listening = Arc::new(AtomicBool::new(false));
 
         infra::web_server::set_current_directory(
             &shared_state,
@@ -893,14 +901,19 @@ fn spawn_web_server(app_state: &ViewerState) -> Option<WebServerState> {
             app_state.current_entry().map(|entry| entry.path.clone()),
         );
 
-        let server_handle =
-            infra::web_server::start(port, shutdown_token.clone(), shared_state.clone());
+        let server_handle = infra::web_server::start(
+            port,
+            shutdown_token.clone(),
+            shared_state.clone(),
+            listening.clone(),
+        );
         log::info!("HTTP server requested on 127.0.0.1:{port}");
 
         Some(WebServerState {
             shutdown_token,
             shared_state,
             server_handle,
+            listening,
         })
     } else {
         None
