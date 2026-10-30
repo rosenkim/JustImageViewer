@@ -23,6 +23,7 @@ Tested and in use on Windows 11 and Apple Silicon Mac.
 - Open a single image or directory from the command line
 - Open images via drag and drop
 - Display thumbnail list
+- View GLB 3D models and generate their thumbnails
 - Display image information
 - Image selection area and copy to clipboard
 - Save and restore settings
@@ -40,6 +41,15 @@ The Library can display up to three directories at the same time. Each directory
 - Opening a fourth directory closes the oldest row and adds the new directory.
 - Use the **X** button in a row header to close that directory.
 - Open directory rows, their focused files, and the active row are restored when the app starts again.
+
+## GLB 3D Models
+
+GLB files appear alongside images in the Library. Select a GLB file to view the model; its thumbnail is generated in the background.
+
+- Drag with the left mouse button to rotate the model.
+- Drag with the right mouse button to pan the view.
+- Use the mouse wheel to zoom.
+- Click **Reset View** to restore the initial view.
 
 ## Build and Run
 
@@ -67,10 +77,10 @@ Discards the existing configuration file and regenerates it with the bundled def
 
 **`PATH` or `File`**
 
-You can pass an image file or a directory path as an argument.
+You can pass an image or GLB file, or a directory path, as an argument.
 
 - If a file path is given: It opens in single file mode.
-- If a directory path is given: It scans the images in the directory and shows a list.
+- If a directory path is given: It scans the images and GLB files in the directory and shows a list.
 
 ## Controls
 
