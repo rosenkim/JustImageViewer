@@ -345,6 +345,26 @@ impl ViewerState {
         &self.config
     }
 
+    /// Apply settings while keeping the current open directories and selection.
+    pub fn apply_config(&mut self, config: AppConfig) {
+        self.set_show_library(config.show_library);
+        self.set_show_info(config.show_info);
+        self.set_show_selection_window(config.show_selection_window);
+        self.set_library_width(config.library_width);
+        self.set_image_view_mode(config.image_view_mode);
+        self.set_library_sort_field(config.library_sort_field);
+        self.set_sort_direction(config.sort_direction);
+        self.set_show_thumbnail(config.show_thumbnail);
+        self.set_show_grid_view(config.show_grid_view);
+        self.config = config;
+        self.config.library_width = self.library_width;
+        self.sync_restore_config();
+    }
+
+    pub fn set_status_message(&mut self, message: String) {
+        self.status_message = message;
+    }
+
     pub fn directory_sessions(&self) -> &[DirectorySession] {
         &self.directories
     }
@@ -1442,6 +1462,25 @@ mod tests {
             PathBuf::from(directory),
             names.iter().map(|name| media_entry(directory, name)).collect(),
         )
+    }
+
+    #[test]
+    fn reloading_settings_keeps_open_directories_and_updates_view_state() {
+        let mut state = test_state();
+        state.directories = vec![session(1, "/first", &["a.png", "b.png"])];
+        state.active_directory_id = Some(DirectoryId(1));
+        state.select_index(1);
+        let config = AppConfig {
+            show_library: false,
+            library_width: 420.0,
+            ..AppConfig::default()
+        };
+        state.apply_config(config);
+        assert!(!state.show_library());
+        assert_eq!(state.library_width(), 420.0);
+        assert_eq!(state.current_directory(), Some(Path::new("/first")));
+        assert_eq!(state.current_entry().unwrap().file_name, "b.png");
+        assert_eq!(state.config().open_directories[0].path, PathBuf::from("/first"));
     }
 
     #[test]

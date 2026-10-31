@@ -99,6 +99,10 @@ Settings are stored under the user's home directory.
 - macOS / Linux: `~/.justImageViewer/settings.toml`
 - Windows: `%USERPROFILE%/.justImageViewer/settings.toml`
 
+Set `model_background_color = "#777B7E"` under `[background_style]` in `settings.toml` to change the 3D model view background. This color is also the default when the setting is omitted.
+
+Use **File → Reload Settings** to apply changes without closing the open directories. Changes to thumbnail image size apply to newly generated thumbnails.
+
 ## Custom Font File Location
 
 Custom font files must be located at the settings file location or in a fonts directory under that location.

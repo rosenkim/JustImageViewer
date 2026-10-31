@@ -616,6 +616,7 @@ impl MainApp {
         // Build ImGui UI for this frame.
         let ui = self.imgui.frame();
         let mut running = true;
+        let mut reload_settings = false;
         let is_pending = self.image_uploader.is_pending() || self.view_panel.is_pending();
         let http_port = self.webserver_state.as_ref().and_then(|server| {
             (server.listening.load(Ordering::Acquire) && !server.server_handle.is_finished())
@@ -629,6 +630,7 @@ impl MainApp {
             http_port,
             &self.app_resources,
             &mut running,
+            &mut reload_settings,
         );
 
         if !running {
@@ -691,6 +693,56 @@ impl MainApp {
         // Submit GPU commands and present the frame to the screen.
         self.queue.submit(Some(encoder.finish()));
         frame.present();
+        if reload_settings {
+            self.reload_settings();
+        }
+    }
+
+    fn reload_settings(&mut self) {
+        let config = match infra::config::load(self.app_state.config_path()) {
+            Ok(config) => config,
+            Err(err) => {
+                log::error!("Failed to reload settings: {err:#}");
+                self.app_state.set_status_message(format!("Failed to reload settings: {err:#}"));
+                return;
+            }
+        };
+        let old = self.app_state.config();
+        let font_changed = old.ui_font_filename != config.ui_font_filename
+            || old.ui_font_size_pt != config.ui_font_size_pt;
+        let port_changed = old.http_port != config.http_port;
+        let cache_changed = old.media_cache_count != config.media_cache_count;
+        self.app_state.apply_config(config);
+        let config = self.app_state.config();
+        apply_imgui_theme(self.imgui.style_mut(), config.imgui_theme);
+        self.ui_scale_factor = if config.ui_scale_factor.is_finite() && config.ui_scale_factor > 0.0 {
+            config.ui_scale_factor
+        } else {
+            constants::DEFAULT_UI_SCALE_FACTOR
+        };
+        self.focused_frame_interval = frame_interval_from_fps(if config.focused_fps > 0 { config.focused_fps } else { constants::DEFAULT_FOCUSED_FPS });
+        self.unfocused_frame_interval = frame_interval_from_fps(if config.unfocused_fps > 0 { config.unfocused_fps } else { constants::DEFAULT_UNFOCUSED_FPS });
+        if font_changed {
+            let font_texture = self.imgui.fonts().tex_id;
+            self.imgui.fonts().clear();
+            self.imgui.fonts().tex_id = font_texture;
+            setup_fonts(&mut self.imgui, &self.app_state, self.ui_scale_factor, self.window.scale_factor() as f32);
+            self.renderer.reload_font_texture(&mut self.imgui, &self.device, &self.queue);
+        } else {
+            self.imgui.io_mut().font_global_scale = compute_font_global_scale(self.ui_scale_factor, self.window.scale_factor() as f32);
+        }
+        if cache_changed {
+            let capacity = if config.media_cache_count > 0 { config.media_cache_count } else { constants::DEFAULT_MEDIA_CACHE_COUNT };
+            self.media_manager = MediaManager::new(capacity);
+        }
+        if port_changed {
+            if let Some(server) = self.webserver_state.take() {
+                server.shutdown_token.cancel();
+                server.server_handle.abort();
+            }
+            self.webserver_state = spawn_web_server(&self.app_state);
+        }
+        self.app_state.set_status_message("Settings reloaded".to_owned());
     }
 
     /// Release all resources and persist state. Called once before exit.
@@ -822,8 +874,13 @@ fn setup_fonts(
     };
 
     let mut custom_font_added = false;
-    if let Some(font_path) = font_path {
-        let font_data = std::fs::read(&font_path).expect("failed to read custom font file");
+    if let Some((font_path, font_data)) = font_path.and_then(|path| match std::fs::read(&path) {
+        Ok(data) => Some((path, data)),
+        Err(err) => {
+            log::warn!("Failed to read font {}: {err}", path.display());
+            None
+        }
+    }) {
         // Leak the data so it lives for the entire program lifetime.
         // imgui requires the font data slice to live as long as the context.
         let font_data: &'static [u8] = Box::leak(font_data.into_boxed_slice());

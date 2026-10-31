@@ -17,6 +17,7 @@ const ORGANIZATION: &str = "rosenkim";
 pub const APPLICATION: &str = "JustImageViewer";
 
 const CONFIG_FILENAME: &str = "settings.toml";
+const DEFAULT_MODEL_BACKGROUND_COLOR: &str = "#777B7E";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
@@ -117,6 +118,7 @@ pub struct BackgroundStyle {
     pub color1: String,
     #[serde(default = "default_background_color2")]
     pub color2: String,
+    pub model_background_color: String,
 }
 
 impl Default for BackgroundStyle {
@@ -125,11 +127,17 @@ impl Default for BackgroundStyle {
             mode: BackgroundMode::Checker,
             color1: default_background_color1(),
             color2: default_background_color2(),
+            model_background_color: DEFAULT_MODEL_BACKGROUND_COLOR.to_owned(),
         }
     }
 }
 
 impl BackgroundStyle {
+    pub fn model_background_rgb(&self) -> [f32; 3] {
+        parse_hex_rgb(&self.model_background_color)
+            .unwrap_or_else(|| parse_hex_rgb(DEFAULT_MODEL_BACKGROUND_COLOR).unwrap())
+    }
+
     pub fn resolved_colors_rgb(&self) -> ([f32; 3], [f32; 3]) {
         let color1 = parse_hex_rgb(&self.color1).unwrap_or([0.3725, 0.3725, 0.3725]);
         let color2 = parse_hex_rgb(&self.color2).unwrap_or([0.2902, 0.2902, 0.2902]);
@@ -178,7 +186,13 @@ pub fn load_or_create(reset_config: bool) -> Result<ConfigHandle> {
         })?;
     }
 
-    let raw = fs::read_to_string(&config_path).with_context(|| {
+    let settings = load(&config_path)?;
+    Ok(ConfigHandle { settings, path: config_path })
+}
+
+/// Read an existing settings file without replacing it on failure.
+pub fn load(config_path: &Path) -> Result<AppConfig> {
+    let raw = fs::read_to_string(config_path).with_context(|| {
         format!(
             "failed to read configuration file {}",
             config_path.display()
@@ -211,10 +225,7 @@ pub fn load_or_create(reset_config: bool) -> Result<ConfigHandle> {
     normalize_background_style(&mut settings.background_style);
     normalize_thumbnail_sizes(&mut settings);
 
-    Ok(ConfigHandle {
-        settings,
-        path: config_path,
-    })
+    Ok(settings)
 }
 
 /// Configuration directory path:
@@ -296,6 +307,13 @@ fn normalize_thumbnail_sizes(settings: &mut AppConfig) {
 }
 
 fn normalize_background_style(style: &mut BackgroundStyle) {
+    if parse_hex_rgb(&style.model_background_color).is_none() {
+        log::warn!(
+            "Invalid background_style.model_background_color. Using default {}",
+            DEFAULT_MODEL_BACKGROUND_COLOR
+        );
+        style.model_background_color = DEFAULT_MODEL_BACKGROUND_COLOR.to_owned();
+    }
     if parse_hex_rgb(&style.color1).is_none() {
         log::warn!(
             "Invalid background_style.color1 '{}'. Using default {}",
@@ -316,7 +334,7 @@ fn normalize_background_style(style: &mut BackgroundStyle) {
 }
 
 pub fn parse_hex_rgb(value: &str) -> Option<[f32; 3]> {
-    if (value.len() != 7 && value.len() != 9) || !value.starts_with('#') {
+    if (value.len() != 7 && value.len() != 9) || !value.starts_with('#') || !value.is_ascii() {
         return None;
     }
 
@@ -334,6 +352,24 @@ pub fn parse_hex_rgb(value: &str) -> Option<[f32; 3]> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn model_background_uses_configured_color_or_default() {
+        let template: AppConfig = toml::from_str(default_template()).unwrap();
+        assert_eq!(template.background_style.model_background_color, DEFAULT_MODEL_BACKGROUND_COLOR);
+        let mut config: AppConfig =
+            toml::from_str("[background_style]\ncolor1 = '#123456'").unwrap();
+        assert_eq!(config.background_style.model_background_rgb(), parse_hex_rgb("#777B7E").unwrap());
+        config.background_style.model_background_color = "#ABCDEF".into();
+        assert_eq!(config.background_style.model_background_rgb(), parse_hex_rgb("#ABCDEF").unwrap());
+        let serialized = toml::to_string_pretty(&config).unwrap();
+        let restored: AppConfig = toml::from_str(&serialized).unwrap();
+        assert_eq!(restored.background_style.model_background_rgb(), config.background_style.model_background_rgb());
+        config.background_style.model_background_color = "#한글ab".into();
+        assert_eq!(config.background_style.model_background_rgb(), parse_hex_rgb("#777B7E").unwrap());
+        normalize_background_style(&mut config.background_style);
+        assert_eq!(config.background_style.model_background_color, "#777B7E");
+    }
 
     #[test]
     fn recent_directory_count_defaults_without_history_in_config() {

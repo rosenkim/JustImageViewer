@@ -234,7 +234,7 @@ impl ViewContentPanel for ModelViewPanel {
             cursor[0] + (available[0] - side) * 0.5,
             cursor[1] + (available[1] - side) * 0.5,
         ]);
-        let background = state.config().background_style.resolved_colors_rgb().0;
+        let background = state.config().background_style.model_background_rgb();
         if self.background != background {
             self.background = background;
             self.dirty = true;

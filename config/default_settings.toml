@@ -37,7 +37,6 @@ focused_fps = 60
 unfocused_fps = 5
 # Optional local HTTP server port (0 disables server)
 # http_port = 0
-
 [background_style]
 # mode can be "checker" or "solid"
 mode = "checker"
@@ -46,3 +45,5 @@ mode = "checker"
 color1 = "#CCCCCC"
 # checker mode alternates color1 and color2
 color2 = "#FFFFFF"
+# 3D model background color in #RRGGBB format
+model_background_color = "#777B7E"

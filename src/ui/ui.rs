@@ -37,8 +37,9 @@ pub fn render_ui(
     http_port: Option<u16>,
     app_resources: &AppResources,
     running: &mut bool,
+    reload_settings: &mut bool,
 ) {
-    render_main_menu_bar(ui, app_state, view_panel, running);
+    render_main_menu_bar(ui, app_state, view_panel, running, reload_settings);
 
     let display = ui.io().display_size;
     // Compute heights using the effective font size so scaled fonts keep layout tight.
@@ -380,6 +381,7 @@ fn render_main_menu_bar(
     app_state: &mut ViewerState,
     view_panel: &mut ViewPanel,
     running: &mut bool,
+    reload_settings: &mut bool,
 ) {
     ui.main_menu_bar(|| {
         ui.menu("File", || {
@@ -404,6 +406,9 @@ fn render_main_menu_bar(
                     app_state.load_directory(path, None);
                 }
             });
+            if ui.menu_item("Reload Settings") {
+                *reload_settings = true;
+            }
             if ui.menu_item("Quit") {
                 *running = false;
             }

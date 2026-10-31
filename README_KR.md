@@ -99,6 +99,10 @@ cargo packager
 - macOS / Linux: `~/.justImageViewer/settings.toml`
 - Windows: `%USERPROFILE%/.justImageViewer/settings.toml`
 
+3D 모델 뷰의 배경색은 `settings.toml`의 `[background_style]` 아래에 `model_background_color = "#777B7E"` 형식으로 지정합니다. 항목이 없으면 이 색을 기본값으로 사용합니다.
+
+**File → Reload Settings** 메뉴로 열린 디렉터리를 유지하면서 설정을 다시 적용할 수 있습니다. 썸네일 이미지 크기 변경은 새로 생성되는 썸네일에 적용됩니다.
+
 ## 커스텀 폰트 파일 위치
 
 커스텀 폰트는 설정파일 위치 또는 설정 파일 위치 아래의 fonts 디렉토리에 있어야 한다.
