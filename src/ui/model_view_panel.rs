@@ -9,14 +9,16 @@ use render3d::{Renderer, Scene};
 
 use crate::app::ViewerState;
 use crate::core::media::MediaType;
+use crate::core::view_capture::ViewCaptureError;
 use crate::render::{
     app_resources::AppResources,
     model_camera::ModelCamera,
     model_surface::{ModelSurface, opaque_background, target_size},
+    texture_readback::TextureReadback,
     view_gpu::ViewGpuContext,
 };
 
-use super::view_panel::ViewContentPanel;
+use super::view_panel::{ViewCaptureContext, ViewCaptureStatus, ViewContentPanel};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct LoadRequest {
@@ -142,6 +144,34 @@ fn selected_model_path(state: &ViewerState) -> Option<PathBuf> {
 impl ViewContentPanel for ModelViewPanel {
     fn request_reload(&mut self) {
         self.reload = true;
+    }
+
+    fn capture(
+        &mut self,
+        state: &ViewerState,
+        ctx: &mut ViewCaptureContext<'_>,
+    ) -> ViewCaptureStatus {
+        // The Library may change the selection earlier in this same UI frame.
+        if self.requests.current.as_ref().map(|r| &r.path) != selected_model_path(state).as_ref() {
+            return ViewCaptureStatus::Pending;
+        }
+        if let Some(error) = &self.error {
+            return ViewCaptureStatus::Finished(Err(ViewCaptureError::Unavailable(error.clone())));
+        }
+        let Some(surface) = &self.surface else {
+            return ViewCaptureStatus::Pending;
+        };
+        // After a resize, wait for the target that matches the new viewport.
+        let viewport_size = target_size(self.requested_size, &ctx.device.limits());
+        if !self.drawn || surface.target.size() != viewport_size {
+            return ViewCaptureStatus::Pending;
+        }
+        match TextureReadback::new(ctx.device, surface.target.color_texture(), ctx.encoder) {
+            Ok(readback) => ViewCaptureStatus::Readback(readback),
+            Err(err) => ViewCaptureStatus::Finished(Err(ViewCaptureError::Failed(format!(
+                "{err:#}"
+            )))),
+        }
     }
 
     fn prepare_frame(&mut self, state: &ViewerState, ctx: &mut ViewGpuContext<'_>) {

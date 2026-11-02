@@ -27,7 +27,9 @@ use crate::app::ViewerState;
 use crate::constants;
 use crate::constants::{LOGICAL_DPI, POINTS_PER_INCH};
 use crate::core::media::MediaType;
+use crate::core::image_encoder::FormatImageEncoder;
 use crate::core::media_manager::MediaManager;
+use crate::core::view_capture::{ViewCaptureQueue, respond_all, view_capture_channel};
 use crate::infra;
 use crate::infra::config::{APPLICATION, AppTheme};
 use crate::render::app_resources::AppResources;
@@ -36,13 +38,14 @@ use crate::render::imgui_textures::ImguiTextures;
 use crate::render::texture_atlas_manager::TextureAtlasManager;
 use crate::render::view_gpu::ViewGpuContext;
 use crate::ui::render_ui;
-use crate::ui::view_panel::ViewPanel;
+use crate::ui::view_panel::{ViewCaptureContext, ViewCaptureStatus, ViewPanel};
 
 struct WebServerState {
     shutdown_token: CancellationToken,
     shared_state: Arc<RwLock<infra::web_server::SharedWebState>>,
     server_handle: tokio::task::JoinHandle<()>,
     listening: Arc<AtomicBool>,
+    view_capture_queue: ViewCaptureQueue,
 }
 
 pub struct MainApp {
@@ -653,6 +656,32 @@ impl MainApp {
         // Model passes must finish before ImGui samples their textures.
         self.view_panel.encode_frame(&mut encoder);
 
+        // Run after the model pass so a capture contains the latest model pixels.
+        let mut view_readback = None;
+        if let Some(queue) = self
+            .webserver_state
+            .as_mut()
+            .map(|server| &mut server.view_capture_queue)
+            .filter(|queue| queue.has_pending())
+        {
+            let status = self.view_panel.capture(
+                &self.app_state,
+                &mut ViewCaptureContext {
+                    device: &self.device,
+                    encoder: &mut encoder,
+                    image_decode_pending: self.image_uploader.is_pending(),
+                },
+            );
+            match status {
+                // Callers stay in the queue until the content is ready.
+                ViewCaptureStatus::Pending => {}
+                ViewCaptureStatus::Finished(result) => respond_all(queue.take_pending(), result),
+                ViewCaptureStatus::Readback(readback) => {
+                    view_readback = Some((readback, queue.take_pending()));
+                }
+            }
+        }
+
         let (background_color1, _) = self
             .app_state
             .config()
@@ -691,8 +720,11 @@ impl MainApp {
         }
 
         // Submit GPU commands and present the frame to the screen.
-        self.queue.submit(Some(encoder.finish()));
+        let submission = self.queue.submit(Some(encoder.finish()));
         frame.present();
+        if let Some((readback, replies)) = view_readback {
+            readback.finish(self.device.clone(), submission, replies);
+        }
         if reload_settings {
             self.reload_settings();
         }
@@ -958,10 +990,18 @@ fn spawn_web_server(app_state: &ViewerState) -> Option<WebServerState> {
             app_state.current_entry().map(|entry| entry.path.clone()),
         );
 
+        let (view_capture, view_capture_queue) =
+            view_capture_channel(constants::VIEW_CAPTURE_QUEUE_CAPACITY);
+        let view_state = infra::web_server::ViewRouteState {
+            capture: view_capture,
+            encoder: Arc::new(FormatImageEncoder::new(constants::VIEW_IMAGE_FORMAT)),
+        };
+
         let server_handle = infra::web_server::start(
             port,
             shutdown_token.clone(),
             shared_state.clone(),
+            view_state,
             listening.clone(),
         );
         log::info!("HTTP server requested on 127.0.0.1:{port}");
@@ -971,6 +1011,7 @@ fn spawn_web_server(app_state: &ViewerState) -> Option<WebServerState> {
             shared_state,
             server_handle,
             listening,
+            view_capture_queue,
         })
     } else {
         None

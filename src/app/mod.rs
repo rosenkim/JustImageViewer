@@ -20,7 +20,7 @@ use crate::{
         config::{AppConfig, OpenDirectoryConfig},
     },
     render::{
-        image_uploader::UploadedTexture,
+        uploaded_texture::UploadedTexture,
         imgui_textures::ImguiTextures,
         texture_atlas_manager::TextureAtlasManager,
     },
@@ -1264,6 +1264,11 @@ impl ViewerState {
         self.sync_restore_config();
 
         Ok(())
+    }
+
+    /// Return whether a reload was requested but has not started yet.
+    pub fn has_reload_request(&self) -> bool {
+        self.needs_image_reload
     }
 
     pub fn take_reload_request(&mut self) -> bool {

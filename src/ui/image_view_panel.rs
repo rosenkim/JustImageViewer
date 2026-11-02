@@ -1,13 +1,18 @@
+use std::path::Path;
+
 use crate::app::{ImageViewMode, ViewerState};
+use crate::core::image_encoder::SharedRgbaImage;
+use crate::core::view_capture::ViewCaptureError;
 use crate::math::{Point2D, Rect2D};
 use crate::render::app_resources::AppResources;
+use crate::render::uploaded_texture::UploadedTexture;
 use imgui::{Condition, StyleVar, TableFlags, Ui};
 
 use super::image_mouse_handler::ImageMouseHandler;
 use super::layout_constants::MIN_SELECTION_SIZE;
 use super::ui::{fit_scale_in_cell, resolve_thumbnail};
 use super::view_background::render_view_background;
-use super::view_panel::ViewContentPanel;
+use super::view_panel::{ViewCaptureContext, ViewCaptureStatus, ViewContentPanel};
 
 // Square cell size for each thumbnail when several selected images are shown.
 const MULTI_VIEW_CELL_SIZE: f32 = 160.0;
@@ -27,6 +32,19 @@ impl ImageViewPanel {
 }
 
 impl ViewContentPanel for ImageViewPanel {
+    fn capture(
+        &mut self,
+        app_state: &ViewerState,
+        ctx: &mut ViewCaptureContext<'_>,
+    ) -> ViewCaptureStatus {
+        decoded_image_status(
+            app_state.is_multi_select(),
+            ctx.image_decode_pending,
+            app_state.current_entry().map(|entry| entry.path.as_path()),
+            app_state.current_texture(),
+        )
+    }
+
     fn render(
         &mut self,
         ui: &Ui,
@@ -109,6 +127,41 @@ impl ViewContentPanel for ImageViewPanel {
         if image_is_visible(app_state) && app_state.show_selection_window() {
             render_selection_window(ui, app_state, &mut self.selection_draft);
         }
+    }
+}
+
+/// Choose the decoded image for `/view`. The old texture stays on screen while
+/// the next one decodes, so the texture must come from the selected file.
+fn decoded_image_status(
+    is_multi_select: bool,
+    decode_pending: bool,
+    selected_path: Option<&Path>,
+    texture: Option<&UploadedTexture>,
+) -> ViewCaptureStatus {
+    let unavailable = |reason: &str| {
+        ViewCaptureStatus::Finished(Err(ViewCaptureError::Unavailable(reason.to_owned())))
+    };
+    if is_multi_select {
+        return unavailable("Multiple files are selected");
+    }
+    let Some(selected_path) = selected_path else {
+        return unavailable("No selected file");
+    };
+    if decode_pending {
+        return ViewCaptureStatus::Pending;
+    }
+    let Some(texture) = texture.filter(|texture| texture.path == selected_path) else {
+        return unavailable("Selected image could not be decoded");
+    };
+    match SharedRgbaImage::from_raw(
+        texture.width as u32,
+        texture.height as u32,
+        texture.pixels.clone(),
+    ) {
+        Some(image) => ViewCaptureStatus::Finished(Ok(image)),
+        None => ViewCaptureStatus::Finished(Err(ViewCaptureError::Failed(
+            "decoded pixels do not match the image size".to_owned(),
+        ))),
     }
 }
 
@@ -316,6 +369,52 @@ mod tests {
         assert!(should_show_image_selection(false, true));
         assert!(!should_show_image_selection(false, false));
         assert!(!should_show_image_selection(true, true));
+    }
+
+    fn texture(path: &str) -> UploadedTexture {
+        UploadedTexture {
+            path: path.into(),
+            id: imgui::TextureId::new(0),
+            width: 2,
+            height: 1,
+            pixels: vec![1, 2, 3, 4, 5, 6, 7, 8].into(),
+        }
+    }
+
+    fn unavailable_reason(status: ViewCaptureStatus) -> String {
+        match status {
+            ViewCaptureStatus::Finished(Err(ViewCaptureError::Unavailable(reason))) => reason,
+            _ => panic!("expected an unavailable image"),
+        }
+    }
+
+    #[test]
+    fn capture_returns_original_pixels_of_the_selected_file() {
+        let selected = texture("a.png");
+        let status = decoded_image_status(false, false, Some(Path::new("a.png")), Some(&selected));
+        let ViewCaptureStatus::Finished(Ok(image)) = status else {
+            panic!("expected the decoded image");
+        };
+        assert_eq!(image.dimensions(), (2, 1));
+        assert_eq!(image.into_raw().as_ref(), selected.pixels.as_ref());
+    }
+
+    #[test]
+    fn capture_never_returns_a_stale_or_missing_image() {
+        let old = texture("old.png");
+        let new_path = Some(Path::new("new.png"));
+        // The old texture stays visible while the new file decodes.
+        assert!(matches!(
+            decoded_image_status(false, true, new_path, Some(&old)),
+            ViewCaptureStatus::Pending
+        ));
+        // A failed decode also leaves the old texture in place.
+        assert!(unavailable_reason(decoded_image_status(false, false, new_path, Some(&old)))
+            .contains("decoded"));
+        assert!(unavailable_reason(decoded_image_status(false, false, None, None))
+            .contains("No selected"));
+        assert!(unavailable_reason(decoded_image_status(true, false, new_path, Some(&old)))
+            .contains("Multiple"));
     }
 
     #[test]

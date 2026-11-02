@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use crate::math::Rect2D;
-use crate::render::image_uploader::UploadedTexture;
+use crate::render::uploaded_texture::UploadedTexture;
 
 /// Resolve a path to its absolute form without the Windows verbatim prefix.
 ///

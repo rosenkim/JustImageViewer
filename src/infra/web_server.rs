@@ -14,6 +14,10 @@ use tokio::net::TcpListener;
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
+use crate::constants::VIEW_CAPTURE_TIMEOUT;
+use crate::core::image_encoder::ImageEncoder;
+use crate::core::view_capture::{ViewCaptureClient, ViewCaptureError};
+
 #[derive(Debug, Default, Clone)]
 pub struct SharedWebState {
     current_directory: Option<PathBuf>,
@@ -45,6 +49,13 @@ pub fn set_selected_file(state: &SharedWebStateHandle, selected_file: Option<Pat
     }
 }
 
+/// Services used by `/view`.
+#[derive(Clone)]
+pub struct ViewRouteState {
+    pub capture: ViewCaptureClient,
+    pub encoder: Arc<dyn ImageEncoder>,
+}
+
 /// Start optional local HTTP server.
 ///
 /// - Binds to `127.0.0.1:{port}`
@@ -52,11 +63,13 @@ pub fn set_selected_file(state: &SharedWebStateHandle, selected_file: Option<Pat
 ///   - `GET /` -> "Hello, World."
 ///   - `GET /fs/*path` -> file from current directory
 ///   - `GET /select` -> currently selected file
+///   - `GET /view` -> full-resolution image shown by the view panel
 /// - Shuts down gracefully when `token` is cancelled
 pub fn start(
     port: u16,
     token: CancellationToken,
     shared_state: SharedWebStateHandle,
+    view_state: ViewRouteState,
     listening: Arc<AtomicBool>,
 ) -> JoinHandle<()> {
     tokio::spawn(async move {
@@ -77,6 +90,7 @@ pub fn start(
         let app = Router::new()
             .route("/", get(root))
             .route("/select", get(select_file))
+            .route("/view", get(view_image).with_state(view_state))
             .route("/fs/{*path}", get(fs_file))
             .with_state(shared_state);
 
@@ -113,6 +127,49 @@ async fn select_file(State(state): State<SharedWebStateHandle>) -> impl IntoResp
     };
 
     file_response_from_path(path).await
+}
+
+async fn view_image(State(view): State<ViewRouteState>) -> Response<Body> {
+    let image = match tokio::time::timeout(VIEW_CAPTURE_TIMEOUT, view.capture.capture()).await {
+        Ok(Ok(image)) => image,
+        Ok(Err(ViewCaptureError::Busy)) => {
+            return (StatusCode::SERVICE_UNAVAILABLE, "View capture is busy").into_response();
+        }
+        Ok(Err(ViewCaptureError::Unavailable(reason))) => {
+            return (StatusCode::NOT_FOUND, reason).into_response();
+        }
+        Ok(Err(err)) => {
+            log::error!("Failed to capture view: {err}");
+            return (StatusCode::INTERNAL_SERVER_ERROR, "Failed to capture view").into_response();
+        }
+        Err(_) => {
+            return (StatusCode::SERVICE_UNAVAILABLE, "View image is not ready").into_response();
+        }
+    };
+
+    // Encoding a large image is slow, so keep it away from the async workers.
+    let encoder = view.encoder;
+    let encoded = match tokio::task::spawn_blocking(move || encoder.encode(&image)).await {
+        Ok(Ok(encoded)) => encoded,
+        Ok(Err(err)) => {
+            log::error!("Failed to encode view: {err:#}");
+            return (StatusCode::INTERNAL_SERVER_ERROR, "Failed to encode view").into_response();
+        }
+        Err(err) => {
+            log::error!("View encoding task stopped: {err}");
+            return (StatusCode::INTERNAL_SERVER_ERROR, "Failed to encode view").into_response();
+        }
+    };
+
+    let mut response = Response::new(Body::from(encoded.bytes));
+    let headers = response.headers_mut();
+    headers.insert(
+        header::CONTENT_TYPE,
+        HeaderValue::from_static(encoded.content_type),
+    );
+    // The view changes all the time, so clients must not reuse an old image.
+    headers.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    response
 }
 
 async fn fs_file(
@@ -226,5 +283,64 @@ fn guess_content_type(path: &Path) -> &'static str {
         Some("dds") => "image/vnd-ms.dds",
         Some("ff") | Some("farbfeld") => "image/farbfeld",
         _ => "application/octet-stream",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::core::image_encoder::{EncodedImage, SharedRgbaImage};
+    use crate::core::view_capture::{respond_all, view_capture_channel};
+
+    struct FakeEncoder;
+
+    impl ImageEncoder for FakeEncoder {
+        fn encode(&self, _image: &SharedRgbaImage) -> anyhow::Result<EncodedImage> {
+            Ok(EncodedImage {
+                bytes: vec![1, 2, 3],
+                content_type: "image/test",
+            })
+        }
+    }
+
+    /// Answer the next capture request with `result`, then return the response.
+    async fn view_response(
+        result: Result<SharedRgbaImage, ViewCaptureError>,
+    ) -> Response<Body> {
+        let (capture, mut queue) = view_capture_channel(1);
+        let state = ViewRouteState {
+            capture,
+            encoder: Arc::new(FakeEncoder),
+        };
+        let request = tokio::spawn(view_image(State(state)));
+        loop {
+            let replies = queue.take_pending();
+            if !replies.is_empty() {
+                respond_all(replies, result);
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+        request.await.unwrap()
+    }
+
+    #[tokio::test]
+    async fn view_uses_the_type_chosen_by_the_encoder() {
+        let response = view_response(Ok(SharedRgbaImage::from_raw(1, 1, vec![0; 4].into()).unwrap())).await;
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(response.headers()[header::CONTENT_TYPE], "image/test");
+        assert_eq!(response.headers()[header::CACHE_CONTROL], "no-store");
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        assert_eq!(&body[..], [1, 2, 3]);
+    }
+
+    #[tokio::test]
+    async fn view_errors_map_to_http_status() {
+        let busy = view_response(Err(ViewCaptureError::Busy)).await;
+        assert_eq!(busy.status(), StatusCode::SERVICE_UNAVAILABLE);
+        let unavailable = view_response(Err(ViewCaptureError::Unavailable("none".to_owned()))).await;
+        assert_eq!(unavailable.status(), StatusCode::NOT_FOUND);
+        let failed = view_response(Err(ViewCaptureError::Failed("gpu".to_owned()))).await;
+        assert_eq!(failed.status(), StatusCode::INTERNAL_SERVER_ERROR);
     }
 }

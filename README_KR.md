@@ -118,6 +118,7 @@ cargo packager
 
 - **GET /** : 서버 상태 확인용 간단한 텍스트 응답을 반환합니다. 예: "Welcome to Just-Image-Viewer!"
 - **GET /select** : 현재 애플리케이션에서 선택된 파일을 반환합니다.
+- **GET /view** : 뷰 패널이 표시하는 원본 이미지를 UI 배율 없이 PNG로 반환합니다. 이미지는 디코딩된 픽셀을 원본 해상도로, 3D 모델은 렌더 타깃을 현재 뷰포트 해상도(최대 2048 x 2048)로 반환합니다. 형식은 [src/constants.rs](src/constants.rs)의 `VIEW_IMAGE_FORMAT`으로 정합니다. 선택한 파일을 불러오는 동안에는 요청이 대기합니다. 반환할 단일 이미지가 없으면(선택 없음, 여러 파일 선택, 불러오기 실패) 404를, 5초 안에 이미지가 준비되지 않거나 대기 중인 요청이 너무 많으면 503을 반환합니다.
 - **GET /fs/{*path}** : 현재 활성화된 Library 디렉토리(앱에서 설정한 base directory) 안의 `path`에 해당하는 파일을 반환합니다.
 
 자세한 동작은 [src/infra/web_server.rs](src/infra/web_server.rs) 파일을 참고하세요.

@@ -2,7 +2,6 @@ use std::{
     path::{Path, PathBuf},
     sync::{
         atomic::{AtomicIsize, Ordering},
-        Arc,
     },
     thread,
     time::Duration,
@@ -12,19 +11,12 @@ use crate::constants::MAX_DECODE_SPAWNS;
 use crate::core::image_loader::DecodedImage;
 use crate::core::media_manager::MediaManager;
 use crate::render::imgui_textures::ImguiTextures;
+use crate::render::uploaded_texture::UploadedTexture;
 use anyhow::Result;
 use imgui::TextureId;
 use tokio::sync::oneshot;
 use wgpu::{Device, Queue};
 static ACTIVE_DECODE_SPAWNS: AtomicIsize = AtomicIsize::new(0);
-
-pub struct UploadedTexture {
-    pub id: TextureId,
-    pub width: usize,
-    pub height: usize,
-    /// RGBA pixel data (row-major, 4 bytes per pixel).
-    pub pixels: Arc<[u8]>,
-}
 
 /// Successful decode result from the background thread.
 struct DecodeOutput {
@@ -189,6 +181,7 @@ impl ImageUploader {
 
         let result_path = path.clone();
         let uploaded = UploadedTexture {
+            path,
             id: texture_id,
             width: decoded.width,
             height: decoded.height,

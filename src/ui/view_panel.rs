@@ -1,12 +1,32 @@
 use crate::app::{ViewerState, format_file_size};
 use crate::core::media::{MediaEntry, MediaType};
+use crate::core::view_capture::ViewCaptureResult;
 use crate::render::app_resources::AppResources;
+use crate::render::texture_readback::TextureReadback;
 use crate::render::view_gpu::ViewGpuContext;
 use imgui::{MouseCursor, StyleVar, Ui};
 
 use super::image_view_panel::ImageViewPanel;
 use super::layout_constants::SPLITTER_WIDTH;
 use super::model_view_panel::ModelViewPanel;
+
+/// Frame services a content panel can use to return its full-resolution image.
+pub struct ViewCaptureContext<'a> {
+    pub device: &'a wgpu::Device,
+    pub encoder: &'a mut wgpu::CommandEncoder,
+    /// True while the selected image is still being decoded.
+    pub image_decode_pending: bool,
+}
+
+/// Result of asking a content panel for its full-resolution image.
+pub enum ViewCaptureStatus {
+    /// The content is still loading, so ask again on the next frame.
+    Pending,
+    /// The answer is known now.
+    Finished(ViewCaptureResult),
+    /// The pixels are on the GPU and arrive after this frame is submitted.
+    Readback(TextureReadback),
+}
 
 /// A content panel draws inside the right-hand view area.
 pub trait ViewContentPanel {
@@ -26,6 +46,13 @@ pub trait ViewContentPanel {
     fn is_pending(&self) -> bool {
         false
     }
+
+    /// Return the source image behind this panel, without UI scaling.
+    fn capture(
+        &mut self,
+        app_state: &ViewerState,
+        ctx: &mut ViewCaptureContext<'_>,
+    ) -> ViewCaptureStatus;
 
     /// Draw the panel inside the view area.
     fn render(
@@ -116,6 +143,19 @@ impl ViewPanel {
             MediaType::Image2D => self.image_content.as_mut(),
             MediaType::Model3D => self.model_content.as_mut(),
         }
+    }
+
+    /// Return the source image behind the active content.
+    pub fn capture(
+        &mut self,
+        app_state: &ViewerState,
+        ctx: &mut ViewCaptureContext<'_>,
+    ) -> ViewCaptureStatus {
+        // A new selection in this frame has not reached the panels yet.
+        if app_state.has_reload_request() {
+            return ViewCaptureStatus::Pending;
+        }
+        self.active_content(app_state).capture(app_state, ctx)
     }
 
     /// Draw the active content and the optional file information area.

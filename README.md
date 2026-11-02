@@ -117,6 +117,7 @@ Endpoints:
 
 - **GET /**: Returns a simple text response to check the server status. Example: "Welcome to Just-Image-Viewer!"
 - **GET /select**: Returns the file currently selected in the application.
+- **GET /view**: Returns the image behind the view panel as a PNG, without UI scaling. An image is returned from its decoded pixels at the original resolution, and a 3D model from its render target at the current viewport resolution (at most 2048 x 2048). The format is set by `VIEW_IMAGE_FORMAT` in [src/constants.rs](src/constants.rs). The request waits while the selected file is loading. Returns 404 if there is no single image to return (nothing selected, multiple files selected, or a file that failed to load), and 503 if the image is not ready within 5 seconds or too many requests are waiting.
 - **GET /fs/{*path}**: Returns the file corresponding to `path` within the active Library directory (base directory set by the app).
 
 For detailed behavior, refer to the [src/infra/web_server.rs](src/infra/web_server.rs) file.

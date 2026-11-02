@@ -4,4 +4,6 @@ pub mod imgui_textures;
 pub mod model_camera;
 pub mod model_surface;
 pub mod texture_atlas_manager;
+pub mod texture_readback;
+pub mod uploaded_texture;
 pub mod view_gpu;

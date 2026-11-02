@@ -21,3 +21,10 @@ pub const DEFAULT_BACKGROUND_COLOR2: &str = "#FFFFFF";
 pub const DEFAULT_THUMBNAIL_IMAGE_SIZE: u32 = 128;
 // Thumbnail cell size drawn in the Library panel (in pixels).
 pub const DEFAULT_LIBRARY_THUMBNAIL_SIZE: f32 = 108.0;
+
+// File format returned by the HTTP `/view` endpoint. Change this one value to use another format.
+pub const VIEW_IMAGE_FORMAT: image::ImageFormat = image::ImageFormat::Png;
+// Maximum number of `/view` requests waiting for the next frame.
+pub const VIEW_CAPTURE_QUEUE_CAPACITY: usize = 16;
+// How long `/view` waits for an image. Loading may be slow, and a hidden window may not draw.
+pub const VIEW_CAPTURE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
