@@ -2,6 +2,7 @@ use crate::app::{ViewerState, format_file_size};
 use crate::core::media::{MediaEntry, MediaType};
 use crate::core::view_capture::ViewCaptureResult;
 use crate::render::app_resources::AppResources;
+use crate::render::image_uploader::ImageLoadState;
 use crate::render::texture_readback::TextureReadback;
 use crate::render::view_gpu::ViewGpuContext;
 use imgui::{MouseCursor, StyleVar, Ui};
@@ -14,8 +15,8 @@ use super::model_view_panel::ModelViewPanel;
 pub struct ViewCaptureContext<'a> {
     pub device: &'a wgpu::Device,
     pub encoder: &'a mut wgpu::CommandEncoder,
-    /// True while the selected image is still being decoded.
-    pub image_decode_pending: bool,
+    /// State of the selected image load.
+    pub image_load_state: ImageLoadState,
 }
 
 /// Result of asking a content panel for its full-resolution image.

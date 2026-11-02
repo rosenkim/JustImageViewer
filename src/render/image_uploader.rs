@@ -32,11 +32,20 @@ struct PendingDecode {
     receiver: oneshot::Receiver<Result<DecodeOutput>>,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ImageLoadState {
+    Idle,
+    Loading,
+    Ready,
+    Failed,
+}
+
 pub struct ImageUploader {
     max_texture_size: u32,
     /// Currently running background decode task (at most one at a time).
     pending: Option<PendingDecode>,
     current_texture_id: Option<TextureId>,
+    load_state: ImageLoadState,
 }
 
 impl ImageUploader {
@@ -48,6 +57,7 @@ impl ImageUploader {
             max_texture_size,
             pending: None,
             current_texture_id: None,
+            load_state: ImageLoadState::Idle,
         }
     }
 
@@ -90,6 +100,7 @@ impl ImageUploader {
             let _ = tx.send(result);
         });
 
+        self.load_state = ImageLoadState::Loading;
         self.pending = Some(PendingDecode {
             path: path.to_path_buf(),
             receiver: rx,
@@ -103,6 +114,7 @@ impl ImageUploader {
         if let Some(pending) = self.pending.take() {
             log::debug!("Cancelled pending decode: {}", pending.path.display());
         }
+        self.load_state = ImageLoadState::Idle;
     }
 
     /// Return the path of the currently pending decode, if any.
@@ -128,12 +140,14 @@ impl ImageUploader {
             Ok(Ok(output)) => output,
             Ok(Err(err)) => {
                 let path = self.pending.take().unwrap().path;
+                self.load_state = ImageLoadState::Failed;
                 log::error!("Async decode failed for {}: {:#}", path.display(), err);
                 return None;
             }
             // Channel closed unexpectedly (task panicked).
             Err(oneshot::error::TryRecvError::Closed) => {
                 let path = self.pending.take().unwrap().path;
+                self.load_state = ImageLoadState::Failed;
                 log::error!("Async decode task dropped for {}", path.display());
                 return None;
             }
@@ -153,6 +167,7 @@ impl ImageUploader {
         if decoded.width as u32 > self.max_texture_size
             || decoded.height as u32 > self.max_texture_size
         {
+            self.load_state = ImageLoadState::Failed;
             log::error!(
                 "Image size {}x{} exceeds GPU max texture size {} for {}",
                 decoded.width,
@@ -174,6 +189,7 @@ impl ImageUploader {
         ) {
             Ok(id) => id,
             Err(err) => {
+                self.load_state = ImageLoadState::Failed;
                 log::error!("GPU upload failed for {}: {:#}", path.display(), err);
                 return None;
             }
@@ -181,7 +197,6 @@ impl ImageUploader {
 
         let result_path = path.clone();
         let uploaded = UploadedTexture {
-            path,
             id: texture_id,
             width: decoded.width,
             height: decoded.height,
@@ -189,6 +204,10 @@ impl ImageUploader {
         };
 
         Some((result_path, uploaded))
+    }
+
+    pub fn load_state(&self) -> ImageLoadState {
+        self.load_state
     }
 
     /// Returns true if there is a background decode in progress.
@@ -204,6 +223,7 @@ impl ImageUploader {
         texture_id: TextureId,
     ) {
         if self.current_texture_id == Some(texture_id) {
+            self.load_state = ImageLoadState::Ready;
             return;
         }
 
@@ -212,6 +232,7 @@ impl ImageUploader {
         }
 
         self.current_texture_id = Some(texture_id);
+        self.load_state = ImageLoadState::Ready;
     }
 
     /// Release a texture immediately.
@@ -241,6 +262,7 @@ impl ImageUploader {
     /// Free all GPU textures owned by this manager.
     pub fn clear(&mut self, renderer: &mut imgui_wgpu::Renderer, imgui_textures: &mut ImguiTextures) {
         self.pending = None;
+        self.load_state = ImageLoadState::Idle;
         self.clear_active_texture(renderer, imgui_textures);
     }
 }

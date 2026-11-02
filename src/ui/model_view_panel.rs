@@ -15,6 +15,7 @@ use crate::render::{
     model_camera::ModelCamera,
     model_surface::{ModelSurface, opaque_background, target_size},
     texture_readback::TextureReadback,
+    uploaded_texture::ViewTexture,
     view_gpu::ViewGpuContext,
 };
 
@@ -269,7 +270,7 @@ impl ViewContentPanel for ModelViewPanel {
             self.background = background;
             self.dirty = true;
         }
-        imgui::Image::new(surface.texture_id, [side, side]).build(ui);
+        imgui::Image::new(ViewTexture::Model(surface).texture_id(), [side, side]).build(ui);
         self.drawn = true;
         let scale = ui.io().display_framebuffer_scale;
         self.requested_size = (side * scale[0].max(scale[1])).ceil().max(1.0) as u32;

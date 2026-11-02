@@ -1,11 +1,10 @@
-use std::path::Path;
-
 use crate::app::{ImageViewMode, ViewerState};
 use crate::core::image_encoder::SharedRgbaImage;
 use crate::core::view_capture::ViewCaptureError;
 use crate::math::{Point2D, Rect2D};
 use crate::render::app_resources::AppResources;
-use crate::render::uploaded_texture::UploadedTexture;
+use crate::render::image_uploader::ImageLoadState;
+use crate::render::uploaded_texture::{UploadedTexture, ViewTexture};
 use imgui::{Condition, StyleVar, TableFlags, Ui};
 
 use super::image_mouse_handler::ImageMouseHandler;
@@ -39,8 +38,8 @@ impl ViewContentPanel for ImageViewPanel {
     ) -> ViewCaptureStatus {
         decoded_image_status(
             app_state.is_multi_select(),
-            ctx.image_decode_pending,
-            app_state.current_entry().map(|entry| entry.path.as_path()),
+            ctx.image_load_state,
+            app_state.current_entry().is_some(),
             app_state.current_texture(),
         )
     }
@@ -83,7 +82,7 @@ impl ViewContentPanel for ImageViewPanel {
             let image_screen_min = ui.cursor_screen_pos();
             render_view_background(ui, app_state, image_screen_min, display_size);
 
-            imgui::Image::new(texture.id, display_size)
+            imgui::Image::new(ViewTexture::Image(texture).texture_id(), display_size)
                 .uv0([0.0, 0.0])
                 .uv1([1.0, 1.0])
                 .build(ui);
@@ -130,12 +129,11 @@ impl ViewContentPanel for ImageViewPanel {
     }
 }
 
-/// Choose the decoded image for `/view`. The old texture stays on screen while
-/// the next one decodes, so the texture must come from the selected file.
+/// Return pixels only when the selected image has finished loading.
 fn decoded_image_status(
     is_multi_select: bool,
-    decode_pending: bool,
-    selected_path: Option<&Path>,
+    load_state: ImageLoadState,
+    has_selection: bool,
     texture: Option<&UploadedTexture>,
 ) -> ViewCaptureStatus {
     let unavailable = |reason: &str| {
@@ -144,13 +142,13 @@ fn decoded_image_status(
     if is_multi_select {
         return unavailable("Multiple files are selected");
     }
-    let Some(selected_path) = selected_path else {
+    if !has_selection {
         return unavailable("No selected file");
-    };
-    if decode_pending {
+    }
+    if load_state == ImageLoadState::Loading {
         return ViewCaptureStatus::Pending;
     }
-    let Some(texture) = texture.filter(|texture| texture.path == selected_path) else {
+    let Some(texture) = texture.filter(|_| load_state == ImageLoadState::Ready) else {
         return unavailable("Selected image could not be decoded");
     };
     match SharedRgbaImage::from_raw(
@@ -371,9 +369,8 @@ mod tests {
         assert!(!should_show_image_selection(true, true));
     }
 
-    fn texture(path: &str) -> UploadedTexture {
+    fn texture() -> UploadedTexture {
         UploadedTexture {
-            path: path.into(),
             id: imgui::TextureId::new(0),
             width: 2,
             height: 1,
@@ -390,8 +387,8 @@ mod tests {
 
     #[test]
     fn capture_returns_original_pixels_of_the_selected_file() {
-        let selected = texture("a.png");
-        let status = decoded_image_status(false, false, Some(Path::new("a.png")), Some(&selected));
+        let selected = texture();
+        let status = decoded_image_status(false, ImageLoadState::Ready, true, Some(&selected));
         let ViewCaptureStatus::Finished(Ok(image)) = status else {
             panic!("expected the decoded image");
         };
@@ -401,19 +398,18 @@ mod tests {
 
     #[test]
     fn capture_never_returns_a_stale_or_missing_image() {
-        let old = texture("old.png");
-        let new_path = Some(Path::new("new.png"));
+        let old = texture();
         // The old texture stays visible while the new file decodes.
         assert!(matches!(
-            decoded_image_status(false, true, new_path, Some(&old)),
+            decoded_image_status(false, ImageLoadState::Loading, true, Some(&old)),
             ViewCaptureStatus::Pending
         ));
         // A failed decode also leaves the old texture in place.
-        assert!(unavailable_reason(decoded_image_status(false, false, new_path, Some(&old)))
+        assert!(unavailable_reason(decoded_image_status(false, ImageLoadState::Failed, true, Some(&old)))
             .contains("decoded"));
-        assert!(unavailable_reason(decoded_image_status(false, false, None, None))
+        assert!(unavailable_reason(decoded_image_status(false, ImageLoadState::Idle, false, None))
             .contains("No selected"));
-        assert!(unavailable_reason(decoded_image_status(true, false, new_path, Some(&old)))
+        assert!(unavailable_reason(decoded_image_status(true, ImageLoadState::Failed, true, Some(&old)))
             .contains("Multiple"));
     }
 

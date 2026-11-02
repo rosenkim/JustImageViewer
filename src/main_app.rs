@@ -397,6 +397,7 @@ impl MainApp {
                     &mut self.imgui_textures,
                     uploaded.id,
                 );
+                self.image_uploader.cancel_pending();
                 log::debug!("Discarding stale decode result: {}", decoded_path.display());
             }
         }
@@ -669,7 +670,7 @@ impl MainApp {
                 &mut ViewCaptureContext {
                     device: &self.device,
                     encoder: &mut encoder,
-                    image_decode_pending: self.image_uploader.is_pending(),
+                    image_load_state: self.image_uploader.load_state(),
                 },
             );
             match status {
