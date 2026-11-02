@@ -61,6 +61,24 @@ struct PendingModel {
     receiver: mpsc::Receiver<Result<LoadedModel>>,
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum ViewportSize {
+    #[default]
+    Auto,
+    Fixed1024,
+}
+
+impl ViewportSize {
+    fn requested_size(self, side: f32, framebuffer_scale: [f32; 2]) -> u32 {
+        match self {
+            Self::Auto => (side * framebuffer_scale[0].max(framebuffer_scale[1]))
+                .ceil()
+                .max(1.0) as u32,
+            Self::Fixed1024 => 1024,
+        }
+    }
+}
+
 pub struct ModelViewPanel {
     requests: ModelRequestState,
     renderer: Option<Arc<Renderer>>,
@@ -70,6 +88,7 @@ pub struct ModelViewPanel {
     error: Option<String>,
     reload: bool,
     requested_size: u32,
+    viewport_size: ViewportSize,
     dragging: Option<MouseButton>,
     drawn: bool,
     dirty: bool,
@@ -87,6 +106,7 @@ impl ModelViewPanel {
             error: None,
             reload: false,
             requested_size: 512,
+            viewport_size: ViewportSize::default(),
             dragging: None,
             drawn: false,
             dirty: false,
@@ -251,6 +271,23 @@ impl ViewContentPanel for ModelViewPanel {
             self.dirty = true;
         }
         ui.same_line();
+        let mut size_index = match self.viewport_size {
+            ViewportSize::Auto => 0,
+            ViewportSize::Fixed1024 => 1,
+        };
+        ui.set_next_item_width(140.0);
+        if ui.combo_simple_string(
+            "##model_viewport_size",
+            &mut size_index,
+            &["Auto", "1024 x 1024"],
+        ) {
+            self.viewport_size = if size_index == 0 {
+                ViewportSize::Auto
+            } else {
+                ViewportSize::Fixed1024
+            };
+        }
+        ui.same_line();
         ui.text_disabled("Controls");
         if ui.is_item_hovered() {
             ui.tooltip_text("Left drag: rotate\nRight drag: pan\nMouse wheel: zoom");
@@ -272,8 +309,9 @@ impl ViewContentPanel for ModelViewPanel {
         }
         imgui::Image::new(ViewTexture::Model(surface).texture_id(), [side, side]).build(ui);
         self.drawn = true;
-        let scale = ui.io().display_framebuffer_scale;
-        self.requested_size = (side * scale[0].max(scale[1])).ceil().max(1.0) as u32;
+        self.requested_size = self
+            .viewport_size
+            .requested_size(side, ui.io().display_framebuffer_scale);
 
         let hovered = ui.is_item_hovered();
         if hovered {
@@ -340,6 +378,20 @@ impl ViewContentPanel for ModelViewPanel {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn viewport_size_follows_window_or_stays_fixed() {
+        assert_eq!(ViewportSize::Auto.requested_size(300.0, [2.0, 2.0]), 600);
+        assert_eq!(ViewportSize::Auto.requested_size(400.0, [1.0, 1.5]), 600);
+        assert_eq!(
+            ViewportSize::Fixed1024.requested_size(300.0, [2.0, 2.0]),
+            1024
+        );
+        assert_eq!(
+            ViewportSize::Fixed1024.requested_size(900.0, [1.0, 1.0]),
+            1024
+        );
+    }
 
     #[test]
     fn latest_selection_and_refresh_reject_stale_loads() {
